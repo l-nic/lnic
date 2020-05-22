@@ -1,16 +1,12 @@
-
-package freechips.rocketchip.tile
+package lnic
 
 import Chisel._
 
 import chisel3.{VecInit, SyncReadMem}
 import chisel3.experimental._
-import freechips.rocketchip.config._
-import freechips.rocketchip.subsystem._
-import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.rocket._
-import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util._
+import freechips.rocketchip.rocket.{LNICRxMsgMeta, StreamChannel, StreamIO}
+import freechips.rocketchip.rocket.LNICRocketConsts._
+import freechips.rocketchip.rocket.LNICUtils._
 import NetworkHelpers._
 import LNICConsts._
 
@@ -26,14 +22,10 @@ class AssembleIO extends Bundle {
   val net_in = Flipped(Decoupled(new StreamChannel(NET_DP_BITS)))
   val meta_in = Flipped(Valid(new PISAIngressMetaOut))
   val net_out = Decoupled(new StreamChannel(XLEN))
-  val meta_out = Valid(new AssembleMetaOut)
+  val meta_out = Valid(new LNICRxMsgMeta)
   val get_rx_msg_info = Flipped(new GetRxMsgInfoIO)
 
   override def cloneType = new AssembleIO().asInstanceOf[this.type]
-}
-
-class AssembleMetaOut extends Bundle {
-  val dst_context = UInt(LNIC_CONTEXT_BITS.W)
 }
 
 class BufInfoTableEntry extends Bundle {
@@ -45,7 +37,7 @@ class BufInfoTableEntry extends Bundle {
 
 class RxMsgIdTableEntry extends Bundle {
   val valid = Bool()
-  val rx_msg_id = UInt(LNIC_MSG_ID_BITS.W)
+  val rx_msg_id = UInt(MSG_ID_BITS.W)
 }
 
 // The first word delivered to the application at the start of
@@ -61,8 +53,8 @@ class RxAppHdr extends Bundle {
 // When the scheduler selects a descriptor the dequeue logic uses
 // the info to deliver the indicated msg to the CPU.
 class RxMsgDescriptor extends Bundle {
-  val rx_msg_id = UInt(LNIC_MSG_ID_BITS.W)
-  val tx_msg_id = UInt(LNIC_MSG_ID_BITS.W)
+  val rx_msg_id = UInt(MSG_ID_BITS.W)
+  val tx_msg_id = UInt(MSG_ID_BITS.W)
   val size_class = UInt(SIZE_CLASS_BITS.W)
   val buf_ptr = UInt(BUF_PTR_BITS.W)
   val dst_context = UInt(LNIC_CONTEXT_BITS.W)
@@ -89,7 +81,7 @@ class LNICAssemble(implicit p: Parameters) extends Module {
   //   Msgs are stored in words that are the same size as the datapath width.
   val msg_buffer_ram = SyncReadMem(NUM_MSG_BUFFER_WORDS, UInt(NET_DP_BITS.W))
   // table mapping {rx_msg_id => received_bitmap}
-  val received_table = Module(new TrueDualPortRAM(MAX_PKTS_PER_MSG, NUM_MSG_BUFFERS))
+  val received_table = Module(new TrueDualPortRAM(MAX_SEGS_PER_MSG, NUM_MSG_BUFFERS))
   received_table.io.clock := clock
   received_table.io.reset := reset
   received_table.io.portA.we := false.B
@@ -257,16 +249,16 @@ class LNICAssemble(implicit p: Parameters) extends Module {
 
   val meta_in_bits_reg = Reg(new PISAIngressMetaOut())
 
-  val max_words_per_pkt = MAX_PKT_LEN_BYTES/NET_DP_BYTES
+  val max_words_per_pkt = MAX_SEG_LEN_BYTES/NET_DP_BYTES
   require(isPow2(max_words_per_pkt))
 
-  val enq_rx_msg_id = Wire(UInt(LNIC_MSG_ID_BITS.W))
+  val enq_rx_msg_id = Wire(UInt(MSG_ID_BITS.W))
   // buf_info_table read port
   val enq_buf_info_table_port = buf_info_table(enq_rx_msg_id)
   val buf_info = Wire(new BufInfoTableEntry())
   val buf_info_reg = Reg(new BufInfoTableEntry())
   // received_table read result
-  val enq_received = Wire(UInt(MAX_PKTS_PER_MSG.W))
+  val enq_received = Wire(UInt(MAX_SEGS_PER_MSG.W))
   // msg_buffer_ram write port
   val pkt_word_ptr = Wire(UInt(BUF_PTR_BITS.W))
   val enq_msg_buffer_ram_port = msg_buffer_ram(pkt_word_ptr)
@@ -302,13 +294,13 @@ class LNICAssemble(implicit p: Parameters) extends Module {
         pkt_word_count := 1.U
         // mark pkt as received
         enq_received := received_table.io.portB.dout
-        val new_enq_received = Wire(UInt(MAX_PKTS_PER_MSG.W))
+        val new_enq_received = Wire(UInt(MAX_SEGS_PER_MSG.W))
         new_enq_received := enq_received | (1.U << io.meta_in.bits.pkt_offset)
         received_table.io.portB.we := !reset.toBool
         received_table.io.portB.din := new_enq_received
         // check if the whole msg has been received
         val num_pkts = MsgBufHelpers.compute_num_pkts(io.meta_in.bits.msg_len)
-        val all_pkts = Wire(UInt(MAX_PKTS_PER_MSG.W))
+        val all_pkts = Wire(UInt(MAX_SEGS_PER_MSG.W))
         all_pkts := (1.U << num_pkts) - 1.U
         val msg_complete = (new_enq_received === all_pkts)
         msg_complete_reg := msg_complete

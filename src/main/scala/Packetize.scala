@@ -1,19 +1,14 @@
-
-package freechips.rocketchip.tile
+package lnic
 
 import Chisel._
 
-import chisel3.{VecInit}
-import chisel3.SyncReadMem
+import chisel3.{VecInit, SyncReadMem}
 import chisel3.experimental._
-import freechips.rocketchip.config._
-import freechips.rocketchip.subsystem._
-import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.rocket._
-import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util._
-import NetworkHelpers._
+import freechips.rocketchip.rocket.{LNICTxMsgWord, StreamChannel, StreamIO}
+import freechips.rocketchip.rocket.LNICUtils._
+import freechips.rocketchip.rocket.LNICRocketConsts._
 import LNICConsts._
+import NetworkHelpers._
 
 // the first word of every msg sent by application
 class TxAppHdr extends Bundle {
@@ -32,7 +27,7 @@ class TxAppHdr extends Bundle {
  */
 
 class PacketizeIO extends Bundle {
-  val net_in = Flipped(Decoupled(new MsgWord))
+  val net_in = Flipped(Decoupled(new LNICTxMsgWord))
   val net_out = Decoupled(new StreamChannel(NET_DP_BITS))
   val meta_out = Valid(new PISAEgressMetaIn)
   // Events
@@ -45,7 +40,7 @@ class PacketizeIO extends Bundle {
 }
 
 class TxMsgDescriptor extends Bundle {
-  val tx_msg_id   = UInt(LNIC_MSG_ID_BITS.W)
+  val tx_msg_id   = UInt(MSG_ID_BITS.W)
   val buf_ptr     = UInt(BUF_PTR_BITS.W)
   val size_class  = UInt(SIZE_CLASS_BITS.W)
   val tx_app_hdr  = new TxAppHdr()
@@ -55,7 +50,7 @@ class TxMsgDescriptor extends Bundle {
 /* Descriptor that is used to schedule TX pkts */
 class TxPktDescriptor extends Bundle {
   val msg_desc    = new TxMsgDescriptor  
-  val tx_pkts     = UInt(MAX_PKTS_PER_MSG.W)
+  val tx_pkts     = UInt(MAX_SEGS_PER_MSG.W)
 }
 
 /* State maintained per-context on enqueue */
@@ -69,7 +64,8 @@ class ContextEnqState extends Bundle {
 
 @chiselName
 class LNICPacketize(implicit p: Parameters) extends Module {
-  val num_contexts = p(LNICKey).maxNumContexts
+  val lnic_params = p(LNICKey).get
+  val num_contexts = MAX_NUM_CONTEXTS
 
   val io = IO(new PacketizeIO)
 
@@ -89,7 +85,7 @@ class LNICPacketize(implicit p: Parameters) extends Module {
 
   /* State required for transport support */
   // table mapping {tx_msg_id => delivered_bitmap}
-  val delivered_table = SyncReadMem(NUM_MSG_BUFFERS, UInt(MAX_PKTS_PER_MSG.W))
+  val delivered_table = SyncReadMem(NUM_MSG_BUFFERS, UInt(MAX_SEGS_PER_MSG.W))
   // table mapping {tx_msg_id => credit}
   val credit_table = Module(new TrueDualPortRAM(CREDIT_BITS, NUM_MSG_BUFFERS))
   credit_table.io.clock := clock
@@ -97,7 +93,7 @@ class LNICPacketize(implicit p: Parameters) extends Module {
   credit_table.io.portA.we := false.B
   credit_table.io.portB.we := false.B
   // table mapping {tx_msg_id => toBtx_bitmap}
-  val toBtx_table = Module(new TrueDualPortRAM(MAX_PKTS_PER_MSG, NUM_MSG_BUFFERS))
+  val toBtx_table = Module(new TrueDualPortRAM(MAX_SEGS_PER_MSG, NUM_MSG_BUFFERS))
   toBtx_table.io.clock := clock
   toBtx_table.io.reset := reset
   toBtx_table.io.portA.we := false.B
@@ -190,7 +186,7 @@ class LNICPacketize(implicit p: Parameters) extends Module {
   val enq_buf_ptr = Wire(UInt(BUF_PTR_BITS.W))
   val enq_msg_buf_ram_port = msg_buffer_ram(enq_buf_ptr)
 
-  val tx_msg_id = Wire(UInt(LNIC_MSG_ID_BITS.W))
+  val tx_msg_id = Wire(UInt(MSG_ID_BITS.W))
   tx_msg_id := tx_msg_id_freelist.io.deq.bits // default
 
   credit_table.io.portA.addr := tx_msg_id
@@ -227,7 +223,7 @@ class LNICPacketize(implicit p: Parameters) extends Module {
         // initialize state that is indexed by tx_msg_id (for transport support)
         delivered_table(tx_msg_id) := 0.U 
         credit_table.io.portA.we := true.B
-        credit_table.io.portA.din := RTT_PKTS.U
+        credit_table.io.portA.din := lnic_params.rttPkts.U
         toBtx_table.io.portA.we := true.B
         toBtx_table.io.portA.din := 0.U // no pkts have been written yet
         // NOTE: we could also initialize max_tx_pkt_offset_table here but that would require
@@ -235,7 +231,7 @@ class LNICPacketize(implicit p: Parameters) extends Module {
         // initialize timer
         io.schedule.valid := true.B
         io.schedule.bits.msg_id := tx_msg_id
-        io.schedule.bits.delay := TIMEOUT_CYCLES.U
+        io.schedule.bits.delay := lnic_params.timeoutCycles.U
         io.schedule.bits.metadata.rtx_offset := 0.U
         io.schedule.bits.metadata.msg_desc := msg_desc
         // state transition
@@ -260,7 +256,7 @@ class LNICPacketize(implicit p: Parameters) extends Module {
         tx_pkt_desc.tx_pkts := 1.U << ctx_state.pkt_offset
 
         val is_last_word = ctx_state.rem_bytes <= XBYTES.U
-        val is_full_pkt = ctx_state.pkt_bytes + XBYTES.U === MAX_PKT_LEN_BYTES.U
+        val is_full_pkt = ctx_state.pkt_bytes + XBYTES.U === MAX_SEG_LEN_BYTES.U
 
         // TODO(sibanez): this part is kinda sketchy - read result doesn't show up until the cycle after
         //   driving the address line (tx_msg_id). So if there are context switches b/w threads
@@ -269,7 +265,7 @@ class LNICPacketize(implicit p: Parameters) extends Module {
         val enq_credit = Wire(UInt(CREDIT_BITS.W))
         enq_credit := credit_table.io.portA.dout
         // get toBtx state read result
-        val enq_toBtx = Wire(UInt(MAX_PKTS_PER_MSG.W))
+        val enq_toBtx = Wire(UInt(MAX_SEGS_PER_MSG.W))
         enq_toBtx := toBtx_table.io.portA.dout
         // NOTES:
         //   - We want to read the current value of toBtx here because if a pkt was dropped, we want to
@@ -278,7 +274,7 @@ class LNICPacketize(implicit p: Parameters) extends Module {
         //     (i.e. PULL arrives quickly or pkts are written slowly) then more pkts can be sent immediately.
 
         when (is_last_word || is_full_pkt) {
-          // only immediately transmit up to RTT_PKTS, not all pkts
+          // only immediately transmit up to credit pkts, not all pkts
           when (ctx_state.pkt_offset < enq_credit) {
             // schedule pkt for tx
             // TODO(sibanez): this isn't really a bug, this can legit happen, how best to deal with it?
@@ -353,7 +349,7 @@ class LNICPacketize(implicit p: Parameters) extends Module {
   // hence if the max_tx_pkt_offset state should be initialized
   val init_max_pkt_offset_reg = RegInit(false.B)
 
-  val deq_tx_msg_id = Wire(UInt(LNIC_MSG_ID_BITS.W))
+  val deq_tx_msg_id = Wire(UInt(MSG_ID_BITS.W))
   deq_tx_msg_id := active_tx_desc_reg.msg_desc.tx_msg_id
 
   val update_max_tx_pkt_offset_port = max_tx_pkt_offset_table(deq_tx_msg_id)
@@ -452,9 +448,9 @@ class LNICPacketize(implicit p: Parameters) extends Module {
     val pkt_offset = PriorityEncoder(descriptor.tx_pkts)
     deq_pkt_offset_reg := pkt_offset
     // find the word offset from the buf_ptr: pkt_offset*words_per_mtu
-    require(isPow2(MAX_PKT_LEN_BYTES), "MAX_PKT_LEN_BYTES must be a power of 2!")
-    require(MAX_PKT_LEN_BYTES >= 64, "MAX_PKT_LEN_BYTES must be at least 64!")
-    val word_offset = pkt_offset << (log2Up(MAX_PKT_LEN_BYTES/NET_DP_BYTES)).U
+    require(isPow2(MAX_SEG_LEN_BYTES), "MAX_SEG_LEN_BYTES must be a power of 2!")
+    require(MAX_SEG_LEN_BYTES >= 64, "MAX_SEG_LEN_BYTES must be at least 64!")
+    val word_offset = pkt_offset << (log2Up(MAX_SEG_LEN_BYTES/NET_DP_BYTES)).U
     // start reading the first word of the pkt
     deq_buf_ptr := descriptor.msg_desc.buf_ptr + word_offset
     deq_buf_ptr_reg := deq_buf_ptr
@@ -473,14 +469,14 @@ class LNICPacketize(implicit p: Parameters) extends Module {
     when (pkt_offset === num_pkts - 1.U) {
         // this is the last pkt of the msg
         // compute the number of bytes in the last pkt of the msg
-        val msg_len_mod_mtu = msg_len(log2Up(MAX_PKT_LEN_BYTES)-1, 0) 
+        val msg_len_mod_mtu = msg_len(log2Up(MAX_SEG_LEN_BYTES)-1, 0) 
         val final_pkt_bytes = Mux(msg_len_mod_mtu === 0.U,
-                                  MAX_PKT_LEN_BYTES.U,
+                                  MAX_SEG_LEN_BYTES.U,
                                   msg_len_mod_mtu)
         deq_pkt_rem_bytes_reg := final_pkt_bytes
     } .otherwise {
         // this is not the last pkt of the msg
-        deq_pkt_rem_bytes_reg := MAX_PKT_LEN_BYTES.U
+        deq_pkt_rem_bytes_reg := MAX_SEG_LEN_BYTES.U
     }
   }
 
@@ -497,7 +493,7 @@ class LNICPacketize(implicit p: Parameters) extends Module {
   val delivered_reg_0 = RegNext(io.delivered)
   val delivered_reg_1 = RegNext(delivered_reg_0)
   // read/write port to update delivered state
-  val delivered_ptr = Wire(UInt(LNIC_MSG_ID_BITS.W))
+  val delivered_ptr = Wire(UInt(MSG_ID_BITS.W))
   delivered_ptr := delivered_reg_0.bits.tx_msg_id
   val update_delivered_table_port = delivered_table(delivered_ptr)
 
@@ -518,18 +514,18 @@ class LNICPacketize(implicit p: Parameters) extends Module {
     }
     is (sWriteDelivered) {
       // get read result
-      val delivered_bitmap = Wire(UInt(MAX_PKTS_PER_MSG.W))
+      val delivered_bitmap = Wire(UInt(MAX_SEGS_PER_MSG.W))
       delivered_bitmap := update_delivered_table_port
 
       // compute updated bitmap
-      val new_delivered_bitmap = Wire(UInt(MAX_PKTS_PER_MSG.W))
+      val new_delivered_bitmap = Wire(UInt(MAX_SEGS_PER_MSG.W))
       new_delivered_bitmap := delivered_bitmap | (1.U << delivered_reg_1.bits.pkt_offset)
       delivered_ptr := delivered_reg_1.bits.tx_msg_id
       update_delivered_table_port := new_delivered_bitmap
 
       // check if all pkts have been delivered
       val num_pkts = MsgBufHelpers.compute_num_pkts(delivered_reg_1.bits.msg_len)
-      val all_pkts = Wire(UInt(MAX_PKTS_PER_MSG.W))
+      val all_pkts = Wire(UInt(MAX_SEGS_PER_MSG.W))
       all_pkts := (1.U << num_pkts) - 1.U
       when (new_delivered_bitmap === all_pkts) {
         // free tx_msg_id
@@ -563,7 +559,7 @@ class LNICPacketize(implicit p: Parameters) extends Module {
   val creditToBtx_reg_1 = RegNext(creditToBtx_reg_0)
   // read/write port to update creditToBtx state
   val credit_ptr = Wire(UInt(CREDIT_BITS.W))
-  val toBtx_ptr = Wire(UInt(MAX_PKTS_PER_MSG.W))
+  val toBtx_ptr = Wire(UInt(MAX_SEGS_PER_MSG.W))
   credit_ptr := creditToBtx_reg_0.bits.tx_msg_id
   toBtx_ptr := creditToBtx_reg_0.bits.tx_msg_id
   credit_table.io.portB.addr := credit_ptr
@@ -584,23 +580,23 @@ class LNICPacketize(implicit p: Parameters) extends Module {
     is (sWriteState) {
       // get read results
       val credit = Wire(UInt(CREDIT_BITS.W))
-      val toBtx = Wire(UInt(MAX_PKTS_PER_MSG.W))
+      val toBtx = Wire(UInt(MAX_SEGS_PER_MSG.W))
       credit := credit_table.io.portB.dout
       toBtx := toBtx_table.io.portB.dout
 
       // update toBtx with rtx pkt
-      val rtx_toBtx = Wire(UInt(MAX_PKTS_PER_MSG.W))
+      val rtx_toBtx = Wire(UInt(MAX_SEGS_PER_MSG.W))
       rtx_toBtx := Mux(creditToBtx_reg_1.bits.rtx,
                        toBtx | (1.U << creditToBtx_reg_1.bits.rtx_pkt_offset),
                        toBtx)
 
       // compute updated credit and toBtx state
       val new_credit = Wire(UInt(CREDIT_BITS.W))
-      val new_toBtx = Wire(UInt(MAX_PKTS_PER_MSG.W))
+      val new_toBtx = Wire(UInt(MAX_SEGS_PER_MSG.W))
       when (creditToBtx_reg_1.bits.update_credit) {
         new_credit := creditToBtx_reg_1.bits.new_credit
         // compute pkts to transmit
-        val credit_tx_pkts = Wire(UInt(MAX_PKTS_PER_MSG.W))
+        val credit_tx_pkts = Wire(UInt(MAX_SEGS_PER_MSG.W))
         credit_tx_pkts := rtx_toBtx & ((1.U << new_credit) - 1.U)
         // clear bits of pkts to be transmitted
         new_toBtx := rtx_toBtx & ~credit_tx_pkts
@@ -657,7 +653,7 @@ class LNICPacketize(implicit p: Parameters) extends Module {
   //   for this table. This should really access a separate table that is sync'd with the delivered_table
   //   in the background.
   // delivered_table read port
-  val timeout_msg_id = Wire(UInt(LNIC_MSG_ID_BITS.W))
+  val timeout_msg_id = Wire(UInt(MSG_ID_BITS.W))
   timeout_msg_id := timeout_reg_0.bits.msg_id
   val timeout_delivered_table_port = delivered_table(timeout_msg_id) 
 
@@ -679,13 +675,13 @@ class LNICPacketize(implicit p: Parameters) extends Module {
     }
     is (sSchedRtx) {
       // get read results
-      val delivered_bitmap = Wire(UInt(MAX_PKTS_PER_MSG.W))
+      val delivered_bitmap = Wire(UInt(MAX_SEGS_PER_MSG.W))
       delivered_bitmap := timeout_delivered_table_port
       val max_tx_pkt_offset = Wire(UInt(PKT_OFFSET_BITS.W))
       max_tx_pkt_offset := max_tx_pkt_offset_port
 
       // find any pkts to retransmit
-      val rtx_pkts_mask = Wire(UInt(MAX_PKTS_PER_MSG.W))
+      val rtx_pkts_mask = Wire(UInt(MAX_SEGS_PER_MSG.W))
       rtx_pkts_mask := (1.U << timeout_reg_1.bits.metadata.rtx_offset) - 1.U
       val rtx_pkts = ~delivered_bitmap & rtx_pkts_mask
       when (rtx_pkts > 0.U && !reset.toBool) {
@@ -701,7 +697,7 @@ class LNICPacketize(implicit p: Parameters) extends Module {
       // fire reschedule event
       io.reschedule.valid := !reset.toBool
       io.reschedule.bits.msg_id := timeout_reg_1.bits.msg_id
-      io.reschedule.bits.delay := TIMEOUT_CYCLES.U
+      io.reschedule.bits.delay := lnic_params.timeoutCycles.U
       io.reschedule.bits.metadata.rtx_offset := max_tx_pkt_offset
       io.reschedule.bits.metadata.msg_desc := timeout_reg_1.bits.metadata.msg_desc
 

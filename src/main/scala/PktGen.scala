@@ -1,16 +1,9 @@
-
-package freechips.rocketchip.tile
+package lnic
 
 import Chisel._
 
-import chisel3.{VecInit, chiselTypeOf}
 import chisel3.experimental._
-import freechips.rocketchip.config._
-import freechips.rocketchip.subsystem._
-import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.rocket._
-import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util._
+import freechips.rocketchip.rocket.{StreamChannel, StreamIO}
 import LNICConsts._
 
 /* LNIC PktGen:

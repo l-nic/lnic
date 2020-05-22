@@ -1,18 +1,12 @@
-
-package freechips.rocketchip.tile
+package lnic
 
 import Chisel._
 
-import chisel3.experimental._
 import chisel3.SyncReadMem
+import chisel3.experimental._
 import chisel3.util.{HasBlackBoxResource}
-import freechips.rocketchip.config._
-import freechips.rocketchip.subsystem._
-import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.rocket._
-import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util._
-import NetworkHelpers._
+import freechips.rocketchip.rocket.{StreamChannel, StreamIO}
+import freechips.rocketchip.rocket.LNICRocketConsts._
 import LNICConsts._
 
 class PISAIngressMetaOut extends Bundle {
@@ -22,8 +16,8 @@ class PISAIngressMetaOut extends Bundle {
   val msg_len      = UInt(MSG_LEN_BITS.W)
   val pkt_offset   = UInt(PKT_OFFSET_BITS.W)
   val dst_context  = UInt(LNIC_CONTEXT_BITS.W)
-  val rx_msg_id    = UInt(LNIC_MSG_ID_BITS.W)
-  val tx_msg_id    = UInt(LNIC_MSG_ID_BITS.W)
+  val rx_msg_id    = UInt(MSG_ID_BITS.W)
+  val tx_msg_id    = UInt(MSG_ID_BITS.W)
 }
 
 class PISAEgressMetaIn extends Bundle {
@@ -33,7 +27,7 @@ class PISAEgressMetaIn extends Bundle {
   val msg_len        = UInt(MSG_LEN_BITS.W)
   val pkt_offset     = UInt(PKT_OFFSET_BITS.W)
   val src_context    = UInt(LNIC_CONTEXT_BITS.W)
-  val tx_msg_id      = UInt(LNIC_MSG_ID_BITS.W)
+  val tx_msg_id      = UInt(MSG_ID_BITS.W)
   val buf_ptr        = UInt(BUF_PTR_BITS.W)
   val buf_size_class = UInt(SIZE_CLASS_BITS.W)
   val pull_offset    = UInt(CREDIT_BITS.W)
@@ -78,19 +72,19 @@ class GetRxMsgInfoIO extends Bundle {
 class GetRxMsgInfoReq extends Bundle {
   val src_ip = UInt(32.W)
   val src_context = UInt(LNIC_CONTEXT_BITS.W)
-  val tx_msg_id = UInt(LNIC_MSG_ID_BITS.W)
+  val tx_msg_id = UInt(MSG_ID_BITS.W)
   val msg_len = UInt(MSG_LEN_BITS.W)
 }
 
 class GetRxMsgInfoResp extends Bundle {
   val fail = Bool()
-  val rx_msg_id = UInt(LNIC_MSG_ID_BITS.W)
+  val rx_msg_id = UInt(MSG_ID_BITS.W)
   // TODO(sibanez): add additional fields for transport processing
   val is_new_msg = Bool()
 }
 
 class DeliveredEvent extends Bundle {
-  val tx_msg_id = UInt(LNIC_MSG_ID_BITS.W)
+  val tx_msg_id = UInt(MSG_ID_BITS.W)
   val pkt_offset = UInt(PKT_OFFSET_BITS.W)
   val msg_len = UInt(MSG_LEN_BITS.W)
   val buf_ptr = UInt(BUF_PTR_BITS.W)
@@ -98,7 +92,7 @@ class DeliveredEvent extends Bundle {
 }
 
 class CreditToBtxEvent extends Bundle {
-  val tx_msg_id = UInt(LNIC_MSG_ID_BITS.W)
+  val tx_msg_id = UInt(MSG_ID_BITS.W)
   val rtx = Bool()
   val rtx_pkt_offset = UInt(PKT_OFFSET_BITS.W)
   val update_credit = Bool()
@@ -142,7 +136,7 @@ class IfElseRawIO extends Bundle {
 }
 
 class IfElseRawReq extends Bundle {
-  val index = UInt(LNIC_MSG_ID_BITS.W)
+  val index = UInt(MSG_ID_BITS.W)
   val data_1 = UInt(CREDIT_BITS.W)
   val opCode_1 = UInt(8.W)
   val data_0 = UInt(CREDIT_BITS.W)
@@ -176,7 +170,7 @@ class IfElseRaw(implicit p: Parameters) extends Module {
   // Need 2 cycles for RMW operation
   assert(!(req_reg_0.valid && req_reg_1.valid), "Violated assumption that requests will not arrive on back-to-back cycles!")
 
-  val ram_ptr = Wire(UInt(LNIC_MSG_ID_BITS.W))
+  val ram_ptr = Wire(UInt(MSG_ID_BITS.W))
   ram_ptr := req_reg_0.bits.index
   val ram_port = ram(ram_ptr)
 

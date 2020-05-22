@@ -1,16 +1,8 @@
-
-package freechips.rocketchip.tile
+package lnic
 
 import Chisel._
 
-import chisel3.{SyncReadMem, VecInit, chiselTypeOf}
 import chisel3.experimental._
-import freechips.rocketchip.config._
-import freechips.rocketchip.subsystem._
-import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.rocket._
-import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util._
 import LNICConsts._
 
 class TimerMeta extends Bundle {
@@ -20,17 +12,17 @@ class TimerMeta extends Bundle {
 }
 
 class ScheduleEvent extends Bundle {
-  val msg_id = UInt(LNIC_MSG_ID_BITS.W)
+  val msg_id = UInt(MSG_ID_BITS.W)
   val delay = UInt(TIMER_BITS.W)
   val metadata = new TimerMeta
 }
 
 class CancelEvent extends Bundle {
-  val msg_id = UInt(LNIC_MSG_ID_BITS.W)
+  val msg_id = UInt(MSG_ID_BITS.W)
 }
 
 class TimeoutEvent extends Bundle {
-  val msg_id = UInt(LNIC_MSG_ID_BITS.W)
+  val msg_id = UInt(MSG_ID_BITS.W)
   val metadata = new TimerMeta
 }
 
@@ -79,7 +71,7 @@ class LNICTimers(implicit p: Parameters) extends Module {
   val new_timer_entry = Wire(new TimerEntry)
 
   // state machine used to search for timeouts
-  val cur_timer_id = RegInit(0.U(LNIC_MSG_ID_BITS.W))
+  val cur_timer_id = RegInit(0.U(MSG_ID_BITS.W))
   val sRead :: sCheck :: Nil = Enum(2)
   val stateTimeout = RegInit(sRead)
 

@@ -1,10 +1,10 @@
-
-package freechips.rocketchip.tile
+package lnic
 
 import Chisel._
 import chisel3.{VecInit, chiselTypeOf}
 import chisel3.util.HasBlackBoxResource
 import chisel3.experimental.IntParam
+import freechips.rocketchip.rocket.{StreamChannel, StreamIO}
 import LNICConsts._
 
 object NetworkHelpers {
@@ -16,11 +16,11 @@ object NetworkHelpers {
 
 object MsgBufHelpers {
   def compute_num_pkts(msg_len: UInt) = {
-    require(isPow2(MAX_PKT_LEN_BYTES))
-    // check if msg_len is divisible by MAX_PKT_LEN_BYTES
-    val num_pkts = Mux(msg_len(log2Up(MAX_PKT_LEN_BYTES)-1, 0) === 0.U,
-                       msg_len >> log2Up(MAX_PKT_LEN_BYTES).U,
-                       (msg_len >> log2Up(MAX_PKT_LEN_BYTES).U) + 1.U)
+    require(isPow2(MAX_SEG_LEN_BYTES))
+    // check if msg_len is divisible by MAX_SEG_LEN_BYTES
+    val num_pkts = Mux(msg_len(log2Up(MAX_SEG_LEN_BYTES)-1, 0) === 0.U,
+                       msg_len >> log2Up(MAX_SEG_LEN_BYTES).U,
+                       (msg_len >> log2Up(MAX_SEG_LEN_BYTES).U) + 1.U)
     num_pkts
   }
   
@@ -41,30 +41,6 @@ object MsgBufHelpers {
     }
     VecInit(size_class_freelists.map(_.io).toSeq)
   }
-}
-
-/**
- * NOTE: Copied StreamChannel and StreamIO here to remove dependency on testchipip.
- */
-
-class StreamChannel(val w: Int) extends Bundle {
-  val data = UInt(w.W)
-  val keep = UInt((w/8).W)
-  val last = Bool()
-
-  override def cloneType = new StreamChannel(w).asInstanceOf[this.type]
-}
-
-class StreamIO(w: Int) extends Bundle {
-  val in = Flipped(Decoupled(new StreamChannel(w)))
-  val out = Decoupled(new StreamChannel(w))
-
-  def flipConnect(other: StreamIO) {
-    in <> other.out
-    other.in <> out
-  }
-
-  override def cloneType = new StreamIO(w).asInstanceOf[this.type]
 }
 
 class StreamNarrower[T <: Data](inW: Int, outW: Int, metaType: T) extends Module {
