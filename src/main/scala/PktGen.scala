@@ -3,6 +3,7 @@ package lnic
 import Chisel._
 
 import chisel3.experimental._
+import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.{StreamChannel, StreamIO}
 import LNICConsts._
 

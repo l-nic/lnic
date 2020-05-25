@@ -7,8 +7,8 @@ import chisel3.experimental._
 import freechips.rocketchip.config._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.diplomacy._
+import freechips.rocketchip.rocket._
 import freechips.rocketchip.rocket.LNICRocketConsts._
-import freechips.rocketchip.rocket.{StreamChannel, StreamIO}
 
 import scala.collection.mutable.LinkedHashMap
 
@@ -20,10 +20,6 @@ object LNICConsts {
   // width of datapath
   val NET_DP_BITS = 512
   val NET_DP_BYTES = NET_DP_BITS/8
-
-  // width of CPU register file interface
-  val XLEN = 64
-  val XBYTES = XLEN/8
 
   def NET_IF_FULL_KEEP = ~0.U(NET_IF_BYTES.W)
   def NET_DP_FULL_KEEP = ~0.U(NET_DP_BYTES.W)
@@ -88,10 +84,10 @@ case object LNICKey extends Field[Option[LNICParams]](None)
  */
 class LNICCoreIO extends Bundle {
   // Msg words from TxQueue
-  val net_in = Flipped(Decoupled(new MsgWord))
+  val net_in = Flipped(Decoupled(new LNICTxMsgWord))
   // Msgs going to RxQueues
-  val net_out = Decoupled(new StreamChannel(LNICConsts.XLEN))
-  val meta_out = Valid(new NetToCoreMeta)
+  val net_out = Decoupled(new StreamChannel(XLEN))
+  val meta_out = Valid(new LNICRxMsgMeta)
 }
 
 /**
@@ -128,7 +124,7 @@ object NICIOvonly {
 /**
  * All IO for the LNIC module.
  */
-class LNICIO(implicit p: Parameters) extends CoreBundle()(p) {
+class LNICIO(implicit p: Parameters) extends Bundle {
   val core = new LNICCoreIO()
   val net = new LNICNetIO()
 }
@@ -208,14 +204,15 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
 
 /** Top-level mixins for including LNIC **/
 
-trait CanHaveLNIC { this: RocketSubsystem =>
+trait CanHaveLNIC { this: HasTiles =>
+  val lnicTiles = tiles
   val lnicOpt = p(LNICKey).map { params =>
     val lnic = LazyModule(new LNIC)
     lnic
   }
 }
 
-trait CanHaveLNICModuleImp extends LazyModuleImp with HasTileParameters {
+trait CanHaveLNICModuleImp extends LazyModuleImp {
   val outer: CanHaveLNIC
 
   val net = outer.lnicOpt.map { lnic =>
@@ -223,8 +220,8 @@ trait CanHaveLNICModuleImp extends LazyModuleImp with HasTileParameters {
     val nicio = IO(new NICIOvonly)
     nicio <> NICIOvonly(lnic.module.io.net)
     // connect L-NIC to tiles
-    require(outer.tiles.size == 1, "For now, L-NIC only supports single tile systems.")
-    outer.tiles.foreach { tile =>
+    require(outer.lnicTiles.size == 1, "For now, L-NIC only supports single tile systems.")
+    outer.lnicTiles.foreach { tile =>
       lnic.module.io.core.net_in <> tile.module.net.get.net_out
       tile.module.net.get.net_in <> lnic.module.io.core.net_out
       tile.module.net.get.meta_in := lnic.module.io.core.meta_out

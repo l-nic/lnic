@@ -4,15 +4,8 @@ import Chisel._
 import chisel3.{VecInit, chiselTypeOf}
 import chisel3.util.HasBlackBoxResource
 import chisel3.experimental.IntParam
-import freechips.rocketchip.rocket.{StreamChannel, StreamIO}
+import freechips.rocketchip.rocket._
 import LNICConsts._
-
-object NetworkHelpers {
-  def reverse_bytes(a: UInt, n: Int) = {
-    val bytes = (0 until n).map(i => a((i + 1) * 8 - 1, i * 8))
-    Cat(bytes)
-  }
-}
 
 object MsgBufHelpers {
   def compute_num_pkts(msg_len: UInt) = {

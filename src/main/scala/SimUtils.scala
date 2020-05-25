@@ -4,6 +4,8 @@ import Chisel._
 
 import chisel3.util.{HasBlackBoxResource}
 import chisel3.experimental._
+import freechips.rocketchip.config.Parameters
+import freechips.rocketchip.rocket.NetworkHelpers._
 
 /* Test Modules */
 
@@ -71,7 +73,7 @@ class Timestamp(to_nic: Boolean = true) extends Module {
       transition(sWordTwo)
     }
     is (sWordTwo) {
-      reg_eth_type := NetworkHelpers.reverse_bytes(io.net.in.bits.data(47, 32), 2)
+      reg_eth_type := reverse_bytes(io.net.in.bits.data(47, 32), 2)
       transition(sWordThree)
     }
     is (sWordThree) {
@@ -82,8 +84,8 @@ class Timestamp(to_nic: Boolean = true) extends Module {
       transition(sWordFive)
     }
     is (sWordFive) {
-      reg_lnic_src := NetworkHelpers.reverse_bytes(io.net.in.bits.data(31, 16), 2)
-      reg_lnic_dst := NetworkHelpers.reverse_bytes(io.net.in.bits.data(47, 32), 2)
+      reg_lnic_src := reverse_bytes(io.net.in.bits.data(31, 16), 2)
+      reg_lnic_dst := reverse_bytes(io.net.in.bits.data(47, 32), 2)
       transition(sWordSix)
     }
     is (sWordSix) {
@@ -95,10 +97,10 @@ class Timestamp(to_nic: Boolean = true) extends Module {
         // overwrite last bytes with timestamp / latency
         when (reg_eth_type === LNICConsts.IP_TYPE && reg_ip_proto === LNICConsts.LNIC_PROTO) {
           when (to_nic.B && (reg_lnic_src === LNICConsts.TEST_CONTEXT_ID)) {
-            io.net.out.bits.data := NetworkHelpers.reverse_bytes(reg_ts_start, 8)
+            io.net.out.bits.data := reverse_bytes(reg_ts_start, 8)
           } .elsewhen (!to_nic.B && (reg_lnic_dst === LNICConsts.TEST_CONTEXT_ID)) {
-            val pkt_ts = NetworkHelpers.reverse_bytes(io.net.in.bits.data, 8)
-            io.net.out.bits.data := NetworkHelpers.reverse_bytes(reg_now - pkt_ts, 8)
+            val pkt_ts = reverse_bytes(io.net.in.bits.data, 8)
+            io.net.out.bits.data := reverse_bytes(reg_now - pkt_ts, 8)
           }
         }
       }

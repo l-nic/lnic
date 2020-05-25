@@ -4,6 +4,7 @@ import Chisel._
 
 import chisel3.SyncReadMem
 import chisel3.experimental._
+import freechips.rocketchip.config.Parameters
 import chisel3.util.{HasBlackBoxResource}
 import freechips.rocketchip.rocket.{StreamChannel, StreamIO}
 import freechips.rocketchip.rocket.LNICRocketConsts._

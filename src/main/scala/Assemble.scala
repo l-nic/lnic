@@ -4,10 +4,10 @@ import Chisel._
 
 import chisel3.{VecInit, SyncReadMem}
 import chisel3.experimental._
-import freechips.rocketchip.rocket.{LNICRxMsgMeta, StreamChannel, StreamIO}
+import freechips.rocketchip.config.Parameters
+import freechips.rocketchip.rocket._
+import freechips.rocketchip.rocket.NetworkHelpers._
 import freechips.rocketchip.rocket.LNICRocketConsts._
-import freechips.rocketchip.rocket.LNICUtils._
-import NetworkHelpers._
 import LNICConsts._
 
 /**
@@ -154,9 +154,9 @@ class LNICAssemble(implicit p: Parameters) extends Module {
   // The size_class from which to allocate a buffer, only valid if allocation_success_reg === true.B
   val size_class_reg = RegInit(0.U)
   // bitmap of valid signals for all size classes
-  val free_classes = size_class_freelists_io.map(_.deq.valid)
+  val free_classes = Wire(VecInit(size_class_freelists_io.map(_.deq.valid)))
   // bitmap of size_classes that are large enough to store the whole msg
-  val candidate_classes = size_class_buf_sizes.map(_ >= get_rx_msg_info_req_reg.bits.msg_len)
+  val candidate_classes = Wire(VecInit(size_class_buf_sizes.map(_ >= get_rx_msg_info_req_reg.bits.msg_len)))
   // bitmap indicates classes with available buffers that are large enough
   val available_classes = free_classes.asUInt & candidate_classes.asUInt
 

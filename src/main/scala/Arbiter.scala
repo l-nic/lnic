@@ -4,8 +4,9 @@ import Chisel._
 
 import chisel3.{VecInit, chiselTypeOf}
 import chisel3.experimental._
+import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.{StreamChannel, StreamIO}
-import NetworkHelpers._
+import freechips.rocketchip.rocket.NetworkHelpers._
 import LNICConsts._
 
 /**
