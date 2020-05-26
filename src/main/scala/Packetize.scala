@@ -167,9 +167,9 @@ class LNICPacketize(implicit p: Parameters) extends Module {
   tx_app_hdr := (new TxAppHdr).fromBits(io.net_in.bits.data)
 
   // bitmap of valid signals for all size classes
-  val free_classes = Wire(VecInit(size_class_freelists_io.map(_.deq.valid)))
+  val free_classes = VecInit(size_class_freelists_io.map(_.deq.valid))
   // bitmap of size_classes that are large enough to store the whole msg
-  val candidate_classes = Wire(VecInit(size_class_buf_sizes.map(_ >= tx_app_hdr.msg_len)))
+  val candidate_classes = VecInit(size_class_buf_sizes.map(_ >= tx_app_hdr.msg_len))
   // bitmap indicates classes with available buffers that are large enough
   val available_classes = free_classes.asUInt & candidate_classes.asUInt
 
