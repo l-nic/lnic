@@ -174,9 +174,13 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
   //////////////////////////
   /* Datapath Connections */
   //////////////////////////
+  // Queue to accomodate a little backpressure from StreamWidener
+  val net_in_queue_deq = Wire(Decoupled(new StreamChannel(LNICConsts.NET_IF_BITS)))
+  net_in_queue_deq <> Queue(io.net.in, LNICConsts.MAX_SEG_LEN_BYTES/LNICConsts.NET_IF_BYTES * 2)
+
   // 64-bit => 512-bit
   StreamWidthAdapter(pisa_ingress.io.net.net_in,
-                     io.net.in)
+                     net_in_queue_deq)
 
   assemble.io.net_in <> pisa_ingress.io.net.net_out
   assemble.io.meta_in := pisa_ingress.io.net.meta_out
