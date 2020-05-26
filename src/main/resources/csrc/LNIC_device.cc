@@ -14,7 +14,7 @@
 #include <linux/if.h>
 #include <linux/if_tun.h>
 
-#include "device.h"
+#include "LNIC_device.h"
 
 static int tuntap_alloc(const char *dev, int flags)
 {

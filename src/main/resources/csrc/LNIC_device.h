@@ -8,7 +8,7 @@
 #include <stdint.h>
 #include <cassert>
 
-#include "packet.h"
+#include "LNIC_packet.h"
 
 class NetworkDevice {
   public:

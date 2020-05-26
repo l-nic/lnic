@@ -5,7 +5,7 @@
 #include <string>
 #include <unordered_map>
 
-#include "device.h"
+#include "LNIC_device.h"
 
 std::unordered_map<std::string, NetworkDevice*> netdev_map;
 

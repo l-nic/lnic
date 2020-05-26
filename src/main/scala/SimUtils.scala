@@ -16,11 +16,11 @@ class SimNetwork extends BlackBox with HasBlackBoxResource {
     val net = Flipped(new NICIOvonly)
   })
 
-  addResource("/vsrc/SimNetwork.v")
-  addResource("/csrc/SimNetwork.cc")
-  addResource("/csrc/device.h")
-  addResource("/csrc/device.cc")
-  addResource("/csrc/packet.h")
+  addResource("/vsrc/LNIC_SimNetwork.v")
+  addResource("/csrc/LNIC_SimNetwork.cc")
+  addResource("/csrc/LNIC_device.h")
+  addResource("/csrc/LNIC_device.cc")
+  addResource("/csrc/LNIC_packet.h")
 }
 
 /**
