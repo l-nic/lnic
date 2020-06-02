@@ -36,7 +36,17 @@ module SimNetwork #(
     output reg        net_in_valid,
     output reg [63:0] net_in_bits_data,
     output reg [7:0]  net_in_bits_keep,
-    output reg        net_in_bits_last
+    output reg        net_in_bits_last,
+
+    // unused ...
+    output [47:0] net_macAddr,
+    output [7:0]  net_rlimit_inc,
+    output [7:0]  net_rlimit_period,
+    output [7:0]  net_rlimit_size,
+
+    output [15:0] net_pauser_threshold,
+    output [15:0] net_pauser_quanta,
+    output [15:0] net_pauser_refresh
 );
 
     string devname = DEVNAME;

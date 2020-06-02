@@ -6,6 +6,7 @@ import chisel3.util.{HasBlackBoxResource}
 import chisel3.experimental._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.NetworkHelpers._
+import icenet.{NICIO, NICIOvonly}
 
 /* Test Modules */
 
@@ -33,8 +34,8 @@ class SimNetwork extends BlackBox with HasBlackBoxResource {
  */
 class LatencyModule extends Module {
   val io = IO(new Bundle {
-    val net = new LNICNetIO 
-    val nic = new LNICNetIO 
+    val net = new NICIO 
+    val nic = new NICIO 
   })
 
   val nic_ts = Module(new Timestamp(to_nic = true))
@@ -48,7 +49,7 @@ class LatencyModule extends Module {
 
 class Timestamp(to_nic: Boolean = true) extends Module {
   val io = IO(new Bundle {
-   val net = new LNICNetIO 
+   val net = new NICIO 
   })
 
   // state machine to parse headers

@@ -9,6 +9,7 @@ import freechips.rocketchip.subsystem._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.rocket.LNICRocketConsts._
+import icenet.{NICIO, NICIOvonly}
 
 import scala.collection.mutable.LinkedHashMap
 
@@ -91,42 +92,11 @@ class LNICCoreIO extends Bundle {
 }
 
 /**
- * This is intended to be the IO to the external network.
- */
-class LNICNetIO extends StreamIO(LNICConsts.NET_IF_BITS) {
-  override def cloneType = (new LNICNetIO).asInstanceOf[this.type]
-}
-
-/**
- * NICIOvonly is taken from IceNIC to expose (mostly) the same external interface.
- * NOTE: I've removed the MAC addr, pauser, and rate limiter settings IO.
- */
-class NICIOvonly extends Bundle {
-  val in = Flipped(Valid(new StreamChannel(LNICConsts.NET_IF_BITS)))
-  val out = Valid(new StreamChannel(LNICConsts.NET_IF_BITS))
-
-  override def cloneType = (new NICIOvonly).asInstanceOf[this.type]
-}
-
-object NICIOvonly {
-  def apply(nicio: LNICNetIO): NICIOvonly = {
-    val vonly = Wire(new NICIOvonly)
-    vonly.out.valid := nicio.out.valid
-    vonly.out.bits  := nicio.out.bits
-    nicio.out.ready := true.B
-    nicio.in.valid  := vonly.in.valid
-    nicio.in.bits   := vonly.in.bits
-    assert(!vonly.in.valid || nicio.in.ready, "NIC input not ready for valid")
-    vonly
-  }
-}
-
-/**
  * All IO for the LNIC module.
  */
 class LNICIO(implicit p: Parameters) extends Bundle {
   val core = new LNICCoreIO()
-  val net = new LNICNetIO()
+  val net = new NICIO()
 }
 
 /**
