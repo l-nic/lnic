@@ -32,7 +32,7 @@
 // *************************************************************************
 //`timescale 1ns/1ps
 
-import sdnet_ingress_pkg::*;
+// import sdnet_ingress_pkg::*;
 
 module SDNetIngressWrapper #(
   parameter TDATA_W = 512
