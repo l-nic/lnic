@@ -118,8 +118,7 @@ class SDNetIngressWrapper extends BlackBox with HasBlackBoxResource {
 
   addResource("/vsrc/SDNetIngressWrapper.sv")
   // additional resources for using Firesim
-  addResource("/vsrc/sdnet_ingress_sdnet_ingress_sdnet.edn")
-  addResource("/vsrc/sdnet_ingress.edf")
+  addResource("/vsrc/sdnet_ingress.edn")
   addResource("/vsrc/sdnet_ingress_stub.v")
   addResource("/vsrc/sdnet_ingress_pkg.sv")
 }
@@ -134,8 +133,7 @@ class SDNetEgressWrapper extends BlackBox with HasBlackBoxResource {
 
   addResource("/vsrc/SDNetEgressWrapper.sv")
   // additional resources for using Firesim
-  addResource("/vsrc/sdnet_egress_sdnet_egress_sdnet.edn")
-  addResource("/vsrc/sdnet_egress.edf")
+  addResource("/vsrc/sdnet_egress.edn")
   addResource("/vsrc/sdnet_egress_stub.v")
   addResource("/vsrc/sdnet_egress_pkg.sv")
 
