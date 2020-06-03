@@ -116,11 +116,12 @@ class SDNetIngressWrapper extends BlackBox with HasBlackBoxResource {
     val net = new LNICPISAIngressIO
   })
 
-  addResource("/vsrc/SDNetIngressWrapper.sv")
   // additional resources for using Firesim
+  addResource("/vsrc/sdnet_ingress_pkg.sv")
   addResource("/vsrc/sdnet_ingress.edn")
   addResource("/vsrc/sdnet_ingress_stub.v")
-  addResource("/vsrc/sdnet_ingress_pkg.sv")
+
+  addResource("/vsrc/SDNetIngressWrapper.sv")
 }
 
 /* Egress Pipeline Blackbox */
@@ -131,12 +132,12 @@ class SDNetEgressWrapper extends BlackBox with HasBlackBoxResource {
     val net = new LNICPISAEgressIO
   })
 
-  addResource("/vsrc/SDNetEgressWrapper.sv")
   // additional resources for using Firesim
+  addResource("/vsrc/sdnet_egress_pkg.sv")
   addResource("/vsrc/sdnet_egress.edn")
   addResource("/vsrc/sdnet_egress_stub.v")
-  addResource("/vsrc/sdnet_egress_pkg.sv")
 
+  addResource("/vsrc/SDNetEgressWrapper.sv")
 }
 
 /* IfElseRawReg Extern */
