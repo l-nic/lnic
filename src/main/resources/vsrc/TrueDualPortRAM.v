@@ -35,7 +35,7 @@ module TrueDualPortRAM #(
        .AUTO_SLEEP_TIME(0),                    // DECIMAL
        .BYTE_WRITE_WIDTH_A(DATA_WIDTH),        // DECIMAL
        .BYTE_WRITE_WIDTH_B(DATA_WIDTH),        // DECIMAL
-       .CASCADE_HEIGHT(0),             // DECIMAL
+//       .CASCADE_HEIGHT(0),             // DECIMAL (unsupported in Vivado 2018.3)
        .CLOCKING_MODE("common_clock"), // String
        .ECC_MODE("no_ecc"),            // String
        .MEMORY_INIT_FILE("none"),      // String
@@ -52,7 +52,7 @@ module TrueDualPortRAM #(
        .READ_RESET_VALUE_B("0"),       // String
        .RST_MODE_A("SYNC"),            // String
        .RST_MODE_B("SYNC"),            // String
-       .SIM_ASSERT_CHK(0),             // DECIMAL; 0=disable simulation messages, 1=enable simulation messages
+//       .SIM_ASSERT_CHK(0),             // DECIMAL; 0=disable simulation messages, 1=enable simulation messages
        .USE_EMBEDDED_CONSTRAINT(0),    // DECIMAL
        .USE_MEM_INIT(1),               // DECIMAL
        .WAKEUP_TIME("disable_sleep"),  // String
