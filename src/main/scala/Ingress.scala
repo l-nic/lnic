@@ -173,7 +173,7 @@ class Ingress(implicit p: Parameters) extends Module {
     is (sWordOne) {
       when (parserPktQueue_out.valid && !reset.toBool) {
         headers := (new Headers).fromBits(reverse_bytes(parserPktQueue_out.bits.data, NET_DP_BYTES))
-        when (headers.eth_type === IP_TYPE && headers.ip_proto === LNIC_PROTO && !parserPktQueue_out.bits.last) {
+        when (headers.eth_type === IPV4_TYPE && headers.ip_proto === LNIC_PROTO && !parserPktQueue_out.bits.last) {
           // this is an LNIC pkt
           // start M/A processing
           headers_reg.valid := true.B

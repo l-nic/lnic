@@ -30,15 +30,17 @@ object LNICConsts {
   val NIC_MAC_ADDR = "h081122334408".U
   val NIC_IP_ADDR = "h0A000001".U // 10.0.0.1
 
-  val IP_TYPE = "h0800".U
-  val LNIC_PROTO = "h99".U
-  val PARSER_PKT_QUEUE_FLITS = ???
-  val MA_PKT_QUEUE_FLITS = ???
+  val IPV4_TYPE = "h0800".U(16.W)
+  val LNIC_PROTO = "h99".U(8.W)
   val DATA_MASK = "b00000001".U(8.W)
   val ACK_MASK  = "b00000010".U(8.W)
   val NACK_MASK = "b00000100".U(8.W)
   val PULL_MASK = "b00001000".U(8.W)
   val CHOP_MASK = "b00010000".U(8.W)
+
+  val IP_HDR_BYTES = 20.U
+  val LNIC_HDR_BYTES = 30.U
+  val LNIC_CTRL_PKT_BYTES = 94.U
 
   val MSG_ID_BITS = 16
   val BUF_PTR_BITS = 16
@@ -77,9 +79,14 @@ object LNICConsts {
   val ARBITER_PKT_BUF_FILTS = MAX_SEG_LEN_BYTES/NET_DP_BYTES * 2
   val ARBITER_META_BUF_FILTS = MAX_SEG_LEN_BYTES/NET_DP_BYTES * 2
 
+  val PARSER_PKT_QUEUE_FLITS = MAX_SEG_LEN_BYTES/NET_DP_BYTES * 2
+  // NOTE: should size MA_PKT_QUEUE_FLITS based on depth of M/A pipeline, but this should be enough
+  val MA_PKT_QUEUE_FLITS = MAX_SEG_LEN_BYTES/NET_DP_BYTES * 2
+  val DEPARSER_META_QUEUE_FLITS = MAX_SEG_LEN_BYTES/NET_DP_BYTES * 2
+  // NOTE: the DEPARSER_PKT_QUEUE can actually fill up and exert backpressure because it is adding headers to the pkts
+  val DEPARSER_PKT_QUEUE_FLITS = MAX_SEG_LEN_BYTES/NET_DP_BYTES * 2
+
   // NOTE: these are only used for the Simulation Timestamp/Latency measurement module
-  val IP_TYPE = 0x800.U(16.W)
-  val LNIC_PROTO = 0x99.U(8.W)
   val TEST_CONTEXT_ID = 0x1234.U(LNIC_CONTEXT_BITS.W)
 }
 
