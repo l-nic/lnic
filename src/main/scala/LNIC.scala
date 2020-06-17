@@ -86,6 +86,11 @@ object LNICConsts {
   // NOTE: the DEPARSER_PKT_QUEUE can actually fill up and exert backpressure because it is adding headers to the pkts
   val DEPARSER_PKT_QUEUE_FLITS = MAX_SEG_LEN_BYTES/NET_DP_BYTES * 2
 
+  // Consts for register externs
+  val REG_READ  = 0.U(8.W)
+  val REG_WRITE = 1.U(8.W)
+  val REG_ADD   = 2.U(8.W)
+
   // NOTE: these are only used for the Simulation Timestamp/Latency measurement module
   val TEST_CONTEXT_ID = 0x1234.U(LNIC_CONTEXT_BITS.W)
 }
@@ -130,8 +135,8 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
   val io = IO(new LNICIO)
 
   // NIC datapath
-  val pisa_ingress = Module(new SDNetIngressWrapper)
-  val pisa_egress = Module(new SDNetEgressWrapper)
+  val pisa_ingress = Module(new Ingress)
+  val pisa_egress = Module(new Egress)
   val assemble = Module(new LNICAssemble)
   val packetize = Module(new LNICPacketize)
 
@@ -140,19 +145,14 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
   val pkt_gen = Module(new LNICPktGen)
   val arbiter = Module(new LNICArbiter)
 
-  pisa_ingress.io.clock := clock
-  pisa_ingress.io.reset := reset
-  pisa_egress.io.clock := clock
-  pisa_egress.io.reset := reset
-
   ////////////////////////////////
   /* Event / Extern Connections */
   ////////////////////////////////
-  credit_reg.io <> pisa_ingress.io.net.creditReg
-  assemble.io.get_rx_msg_info <> pisa_ingress.io.net.get_rx_msg_info
-  packetize.io.delivered := pisa_ingress.io.net.delivered
-  packetize.io.creditToBtx := pisa_ingress.io.net.creditToBtx
-  pkt_gen.io.ctrlPkt := pisa_ingress.io.net.ctrlPkt
+  credit_reg.io <> pisa_ingress.io.creditReg
+  assemble.io.get_rx_msg_info <> pisa_ingress.io.get_rx_msg_info
+  packetize.io.delivered := pisa_ingress.io.delivered
+  packetize.io.creditToBtx := pisa_ingress.io.creditToBtx
+  pkt_gen.io.ctrlPkt := pisa_ingress.io.ctrlPkt
   msg_timers.io.schedule := packetize.io.schedule
   msg_timers.io.reschedule := packetize.io.reschedule
   msg_timers.io.cancel := packetize.io.cancel
@@ -166,11 +166,11 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
   net_in_queue_deq <> Queue(io.net.in, LNICConsts.MAX_SEG_LEN_BYTES/LNICConsts.NET_IF_BYTES * 2)
 
   // 64-bit => 512-bit
-  StreamWidthAdapter(pisa_ingress.io.net.net_in,
+  StreamWidthAdapter(pisa_ingress.io.net_in,
                      net_in_queue_deq)
 
-  assemble.io.net_in <> pisa_ingress.io.net.net_out
-  assemble.io.meta_in := pisa_ingress.io.net.meta_out
+  assemble.io.net_in <> pisa_ingress.io.net_out
+  assemble.io.meta_in := pisa_ingress.io.meta_out
 
   io.core.net_out <> assemble.io.net_out
   io.core.meta_out := assemble.io.meta_out 
@@ -183,12 +183,12 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
   arbiter.io.ctrl_in <> pkt_gen.io.net_out
   arbiter.io.ctrl_meta_in := pkt_gen.io.meta_out
 
-  pisa_egress.io.net.net_in <> arbiter.io.net_out
-  pisa_egress.io.net.meta_in := arbiter.io.meta_out
+  pisa_egress.io.net_in <> arbiter.io.net_out
+  pisa_egress.io.meta_in := arbiter.io.meta_out
 
   // 512-bit => 64-bit
   StreamWidthAdapter(io.net.out,
-                     pisa_egress.io.net.net_out)
+                     pisa_egress.io.net_out)
 
 }
 

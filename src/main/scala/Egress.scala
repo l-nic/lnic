@@ -38,7 +38,7 @@ class LNICPISAEgressIO extends Bundle {
 }
 
 @chiselName
-class Egress(implicit p: Parameter) extends Module {
+class Egress(implicit p: Parameters) extends Module {
   val io = IO(new LNICPISAEgressIO)
 
   // queues to store pkts and metadata that are arriving
@@ -130,7 +130,7 @@ class Egress(implicit p: Parameter) extends Module {
         headers.lnic_buf_size_class := metaQueue_out.bits.buf_size_class
         headers.lnic_padding        := 0.U
 
-        io.net_out.bits.data := reverse_bytes(headers, NET_DP_BYTES)
+        io.net_out.bits.data := reverse_bytes(headers.asUInt, NET_DP_BYTES)
         io.net_out.bits.keep := NET_DP_FULL_KEEP
         io.net_out.bits.last := false.B
         when (io.net_out.ready) {

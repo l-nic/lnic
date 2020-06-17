@@ -234,7 +234,7 @@ class Ingress(implicit p: Parameters) extends Module {
     rx_info_stage1.bits.pipe_meta.genNACK        := false.B // default
     rx_info_stage1.bits.pipe_meta.genPULL        := false.B // default
     rx_info_stage1.bits.pipe_meta.expect_resp    := false.B // default
-    when (headers_reg.bits.lnic_flags & DATA_MASK > 0.U) {
+    when ((headers_reg.bits.lnic_flags & DATA_MASK) > 0.U) {
       // this is a DATA pkt
       rx_info_stage1.bits.pipe_meta.is_data := true.B
       // invoke get_rx_msg_info extern
@@ -268,7 +268,7 @@ class Ingress(implicit p: Parameters) extends Module {
 
       val pull_offset_diff = Wire(UInt(CREDIT_BITS.W))
       pull_offset_diff := 0.U
-      when (rx_info_stage2.bits.pipe_meta.flags & CHOP_MASK > 0.U) {
+      when ((rx_info_stage2.bits.pipe_meta.flags & CHOP_MASK) > 0.U) {
         // this is a chopped data pkt
         credit_stage1.bits.pipe_meta.genNACK := true.B
         credit_stage1.bits.pipe_meta.drop := true.B
@@ -288,7 +288,7 @@ class Ingress(implicit p: Parameters) extends Module {
         io.creditReg.req.bits.index     := io.get_rx_msg_info.resp.bits.rx_msg_id
         io.creditReg.req.bits.data_1    := pull_offset_diff
         io.creditReg.req.bits.opCode_1  := REG_ADD
-        io.creditReg.req.bits.data_0    := RTT_PKTS + pull_offset_diff
+        io.creditReg.req.bits.data_0    := RTT_PKTS.U + pull_offset_diff
         io.creditReg.req.bits.opCode_0  := REG_WRITE
         io.creditReg.req.bits.predicate := io.get_rx_msg_info.resp.bits.is_new_msg
         credit_stage1.bits.pipe_meta.expect_resp := true.B
@@ -301,7 +301,7 @@ class Ingress(implicit p: Parameters) extends Module {
   when (credit_stage2.valid && !reset.toBool) {
     when (credit_stage2.bits.pipe_meta.expect_resp) {
       assert(io.creditReg.resp.valid, "creditReg extern call failed to return result after 2 cycles!")
-      val pull_offset = io.creditReg.resp.new_val
+      val pull_offset = io.creditReg.resp.bits.new_val
 
       // fire control pkt event
       io.ctrlPkt.valid := true.B
@@ -319,7 +319,7 @@ class Ingress(implicit p: Parameters) extends Module {
       io.ctrlPkt.bits.genPULL        := credit_stage2.bits.pipe_meta.genPULL
 
     } .otherwise {
-      when (credit_stage2.bits.pipe_meta.flags & ACK_MASK > 0.U) {
+      when ((credit_stage2.bits.pipe_meta.flags & ACK_MASK) > 0.U) {
         // fire delivered event
         io.delivered.valid := true.B
         io.delivered.bits.tx_msg_id      := credit_stage2.bits.ingress_meta.tx_msg_id
@@ -329,9 +329,9 @@ class Ingress(implicit p: Parameters) extends Module {
         io.delivered.bits.buf_size_class := credit_stage2.bits.pipe_meta.buf_size_class
       }
 
-      when ( (credit_stage2.bits.pipe_meta.flags & NACK_MASK > 0.U) || (credit_stage2.bits.pipe_meta.flags & PULL_MASK > 0.U) ) {
-        val rtx = (credit_stage2.bits.pipe_meta.flags & NACK_MASK > 0.U)
-        val update_credit = (credit_stage2.bits.pipe_meta.flags & PULL_MASK > 0.U)
+      when ( ((credit_stage2.bits.pipe_meta.flags & NACK_MASK) > 0.U) || ((credit_stage2.bits.pipe_meta.flags & PULL_MASK) > 0.U) ) {
+        val rtx = ((credit_stage2.bits.pipe_meta.flags & NACK_MASK) > 0.U)
+        val update_credit = ((credit_stage2.bits.pipe_meta.flags & PULL_MASK) > 0.U)
 
         // fire creditToBtx event
         io.creditToBtx.valid := true.B

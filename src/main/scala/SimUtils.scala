@@ -96,7 +96,7 @@ class Timestamp(to_nic: Boolean = true) extends Module {
       when (io.net.in.valid && io.net.in.ready && io.net.in.bits.last) {
         state := sWordOne
         // overwrite last bytes with timestamp / latency
-        when (reg_eth_type === LNICConsts.IP_TYPE && reg_ip_proto === LNICConsts.LNIC_PROTO) {
+        when (reg_eth_type === LNICConsts.IPV4_TYPE && reg_ip_proto === LNICConsts.LNIC_PROTO) {
           when (to_nic.B && (reg_lnic_src === LNICConsts.TEST_CONTEXT_ID)) {
             io.net.out.bits.data := reverse_bytes(reg_ts_start, 8)
           } .elsewhen (!to_nic.B && (reg_lnic_dst === LNICConsts.TEST_CONTEXT_ID)) {
