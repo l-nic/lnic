@@ -30,6 +30,16 @@ object LNICConsts {
   val NIC_MAC_ADDR = "h081122334408".U
   val NIC_IP_ADDR = "h0A000001".U // 10.0.0.1
 
+  val IP_TYPE = "h0800".U
+  val LNIC_PROTO = "h99".U
+  val PARSER_PKT_QUEUE_FLITS = ???
+  val MA_PKT_QUEUE_FLITS = ???
+  val DATA_MASK = "b00000001".U(8.W)
+  val ACK_MASK  = "b00000010".U(8.W)
+  val NACK_MASK = "b00000100".U(8.W)
+  val PULL_MASK = "b00001000".U(8.W)
+  val CHOP_MASK = "b00010000".U(8.W)
+
   val MSG_ID_BITS = 16
   val BUF_PTR_BITS = 16
   val SIZE_CLASS_BITS = 8
