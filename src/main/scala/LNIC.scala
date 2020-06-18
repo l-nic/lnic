@@ -82,6 +82,8 @@ object LNICConsts {
   val PARSER_PKT_QUEUE_FLITS = MAX_SEG_LEN_BYTES/NET_DP_BYTES * 2
   // NOTE: should size MA_PKT_QUEUE_FLITS based on depth of M/A pipeline, but this should be enough
   val MA_PKT_QUEUE_FLITS = MAX_SEG_LEN_BYTES/NET_DP_BYTES * 2
+  // NOTE: MA_META_QUEUE is just used to synchronize metadata and payload and can be pretty small
+  val MA_META_QUEUE_FLITS = MAX_SEG_LEN_BYTES/NET_DP_BYTES * 2
   val DEPARSER_META_QUEUE_FLITS = MAX_SEG_LEN_BYTES/NET_DP_BYTES * 2
   // NOTE: the DEPARSER_PKT_QUEUE can actually fill up and exert backpressure because it is adding headers to the pkts
   val DEPARSER_PKT_QUEUE_FLITS = MAX_SEG_LEN_BYTES/NET_DP_BYTES * 2

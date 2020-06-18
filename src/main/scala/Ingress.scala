@@ -146,6 +146,12 @@ class Ingress(implicit p: Parameters) extends Module {
   maPktQueue_in.valid := false.B // default
   maPktQueue_out.ready := false.B // default
 
+  // need metadata queue to synchronize metadata with pkt payload
+  val maMetaQueue_in = Wire(Decoupled(new PipelineRegs))
+  val maMetaQueue_out = Wire(Flipped(Decoupled(new PipelineRegs)))
+  maMetaQueue_in.valid := false.B // default
+  maMetaQueue_out.ready := false.B // default
+
   // default IO
   io.net_out.valid := false.B
   io.meta_out.valid := false.B
@@ -191,12 +197,12 @@ class Ingress(implicit p: Parameters) extends Module {
       // write pkt payload into maPktQueue
       maPktQueue_in <> parserPktQueue_out
       assert(maPktQueue_in.ready, "M/A Pkt Queue cannot store pkt payload, it must be too small!")
-      when (parserPktQueue_out.bits.last) {
+      when (parserPktQueue_out.valid && parserPktQueue_out.bits.last) {
         parseState := sWordOne
       }
     }
     is (sDropPkt) {
-      when (parserPktQueue_out.bits.last) {
+      when (parserPktQueue_out.valid && parserPktQueue_out.bits.last) {
         parseState := sWordOne
       }
     }
@@ -212,6 +218,7 @@ class Ingress(implicit p: Parameters) extends Module {
   val credit_stage2 = Reg(Valid(new PipelineRegs))
 
   maPktQueue_out <> Queue(maPktQueue_in, MA_PKT_QUEUE_FLITS)
+  maMetaQueue_out <> Queue(maMetaQueue_in, MA_META_QUEUE_FLITS)
 
   rx_info_stage1.valid := headers_reg.valid
 
@@ -352,32 +359,38 @@ class Ingress(implicit p: Parameters) extends Module {
     }
   }
 
-  // logic to drive net_out and meta_out IO
-  val pktOutState = RegInit(sWordOne)
+  // write to maMetaQueue 
   when (credit_stage2.valid && !reset.toBool) {
-    assert(pktOutState === sWordOne, "Pkt transfer state machine is not ready after M/A processing!")
-    assert(maPktQueue_out.valid, "Pkt payload not available after M/A processing!")
-    when (credit_stage2.bits.pipe_meta.drop) {
-      // drop the pkt payload
-      maPktQueue_out.ready := true.B
-      when (!maPktQueue_out.bits.last) {
-        pktOutState := sDropPkt
-      }
-    } .otherwise {
-      // transfer first word (and metadata)
-      assert(io.net_out.ready, "net_out.ready is false after M/A processing!")
-      io.net_out <> maPktQueue_out
-      io.meta_out.valid := true.B
-      io.meta_out.bits := credit_stage2.bits.ingress_meta
-      when (!maPktQueue_out.bits.last) {
-        pktOutState := sFinishPkt
-      }
-    }
+    maMetaQueue_in.valid := true.B
+    maMetaQueue_in.bits := credit_stage2.bits
+    assert(maMetaQueue_in.ready, "maMetaQueue is full in Ingress pipeline!")
   }
+
+  // state machine to drive net_out and meta_out
+  val pktOutState = RegInit(sWordOne)
 
   switch (pktOutState) {
     is (sWordOne) {
-      // state logic is specified above
+      // wait for both metadata and payload
+      when (maPktQueue_out.valid && maMetaQueue_out.valid) {
+        when (maMetaQueue_out.bits.pipe_meta.drop) {
+          // drop the pkt payload an metadata
+          maPktQueue_out.ready := true.B
+          maMetaQueue_out.ready := true.B
+          when (!maPktQueue_out.bits.last) {
+            pktOutState := sDropPkt
+          }
+        } .otherwise {
+          // transfer first word (and metadata)
+          io.net_out <> maPktQueue_out
+          io.meta_out.valid := true.B
+          io.meta_out.bits := maMetaQueue_out.bits.ingress_meta
+          maMetaQueue_out.ready := io.net_out.ready // only read metaQueue when first word is transferred
+          when (io.net_out.ready && !maPktQueue_out.bits.last) {
+            pktOutState := sFinishPkt
+          }
+        }
+      }
     }
     is (sFinishPkt) {
       io.net_out <> maPktQueue_out
