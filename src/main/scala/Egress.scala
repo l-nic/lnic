@@ -33,6 +33,7 @@ class LNICPISAEgressIO extends Bundle {
   val net_in = Flipped(Decoupled(new StreamChannel(NET_DP_BITS)))
   val meta_in = Flipped(Valid(new PISAEgressMetaIn))
   val net_out = Decoupled(new StreamChannel(NET_DP_BITS))
+  val mac_addr = Flipped(UInt(ETH_MAC_BITS.W))
 
   override def cloneType = new LNICPISAEgressIO().asInstanceOf[this.type]
 }
@@ -91,7 +92,7 @@ class Egress(implicit p: Parameters) extends Module {
         val headers = Wire(new Headers)
         // Ethernet Header
         headers.eth_dst  := SWITCH_MAC_ADDR
-        headers.eth_src  := NIC_MAC_ADDR
+        headers.eth_src  := io.mac_addr
         headers.eth_type := IPV4_TYPE
 
         // IP Header

@@ -12,11 +12,14 @@ import "DPI-C" function void network_tick (
     input  bit     rx_ready,
     output longint rx_data,
     output byte    rx_keep,
-    output bit     rx_last
+    output bit     rx_last,
+
+    output longint mac_addr
 );
 
 import "DPI-C" function void network_init (
-    input string devname
+    input string devname,
+    input longint mac_addr
 );
 
 module SimNetwork #(
@@ -50,12 +53,18 @@ module SimNetwork #(
 );
 
     string devname = DEVNAME;
+    longint mac_addr = 2;
 
     // NOTE: currently unused
     reg net_out_ready;
+    int dummy;
+
+    longint __macaddr;
+    reg [47:0] __macaddr_reg;
 
     initial begin
-        network_init(devname);
+        dummy = $value$plusargs("mac_addr=%h", mac_addr);
+        network_init(devname, mac_addr);
     end
 
     always@(posedge clock) begin
@@ -80,8 +89,13 @@ module SimNetwork #(
                 1'b1,
                 net_in_bits_data,
                 net_in_bits_keep,
-                net_in_bits_last);
+                net_in_bits_last,
+                
+                __macaddr);
+            __macaddr_reg <= __macaddr;
         end
     end
+
+    assign net_macAddr = __macaddr_reg;
 
 endmodule

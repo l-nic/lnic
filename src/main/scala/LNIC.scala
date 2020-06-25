@@ -27,7 +27,7 @@ object LNICConsts {
   def NET_CPU_FULL_KEEP = ~0.U(XBYTES.W)
 
   val SWITCH_MAC_ADDR = "h085566778808".U
-  val NIC_MAC_ADDR = "h081122334408".U
+  //val NIC_MAC_ADDR = "h081122334408".U
   val NIC_IP_ADDR = "h0A000001".U // 10.0.0.1
 
   val IPV4_TYPE = "h0800".U(16.W)
@@ -95,6 +95,8 @@ object LNICConsts {
 
   // NOTE: these are only used for the Simulation Timestamp/Latency measurement module
   val TEST_CONTEXT_ID = 0x1234.U(LNIC_CONTEXT_BITS.W)
+
+  val ETH_MAC_BITS = 48
 }
 
 case class LNICParams(
@@ -187,6 +189,7 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
 
   pisa_egress.io.net_in <> arbiter.io.net_out
   pisa_egress.io.meta_in := arbiter.io.meta_out
+  pisa_egress.io.mac_addr := io.net.macAddr
 
   // 512-bit => 64-bit
   StreamWidthAdapter(io.net.out,
