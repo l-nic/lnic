@@ -444,7 +444,7 @@ class LNICAssemble(implicit p: Parameters) extends Module {
       buf_net_out_wide.valid := true.B
       // read current buffer word
       buf_net_out_wide.bits.data := deq_msg_buf_ram_port
-      val is_last_word = rem_bytes_reg < NET_DP_BYTES.U
+      val is_last_word = rem_bytes_reg <= NET_DP_BYTES.U
       buf_net_out_wide.bits.keep := Mux(is_last_word,
                                         (1.U << rem_bytes_reg) - 1.U,
                                         NET_DP_FULL_KEEP)
