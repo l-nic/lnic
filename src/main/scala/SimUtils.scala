@@ -6,7 +6,8 @@ import chisel3.util.{HasBlackBoxResource}
 import chisel3.experimental._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.NetworkHelpers._
-import icenet.{NICIO, NICIOvonly}
+import NICIO._
+import NICIOvonly._
 
 /* Test Modules */
 

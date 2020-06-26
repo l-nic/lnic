@@ -14,12 +14,16 @@ import "DPI-C" function void network_tick (
     output byte    rx_keep,
     output bit     rx_last,
 
-    output longint mac_addr
+    output longint nic_mac_addr,
+    output longint switch_mac_addr,
+    output int     nic_ip_addr
 );
 
 import "DPI-C" function void network_init (
-    input string devname,
-    input longint mac_addr
+    input string    devname,
+    input longint   nic_mac_addr,
+    input longint   switch_mac_addr,
+    input int       nic_ip_addr
 );
 
 module SimNetwork #(
@@ -41,30 +45,33 @@ module SimNetwork #(
     output reg [7:0]  net_in_bits_keep,
     output reg        net_in_bits_last,
 
-    // unused ...
-    output [47:0] net_macAddr,
-    output [7:0]  net_rlimit_inc,
-    output [7:0]  net_rlimit_period,
-    output [7:0]  net_rlimit_size,
+    output [47:0] net_nic_mac_addr,
+    output [47:0] net_switch_mac_addr,
+    output [31:0] net_nic_ip_addr
 
-    output [15:0] net_pauser_threshold,
-    output [15:0] net_pauser_quanta,
-    output [15:0] net_pauser_refresh
 );
 
     string devname = DEVNAME;
-    longint mac_addr = 2;
+    longint nic_mac_addr = 0;
+    longint switch_mac_addr = 0;
+    int nic_ip_addr = 0;
 
     // NOTE: currently unused
     reg net_out_ready;
     int dummy;
 
-    longint __macaddr;
-    reg [47:0] __macaddr_reg;
+    longint _nic_mac_addr;
+    reg [47:0] _nic_mac_addr_reg;
+    longint _switch_mac_addr;
+    reg [47:0] _switch_mac_addr_reg;
+    int _nic_ip_addr;
+    reg [31:0] _nic_ip_addr_reg;
 
     initial begin
-        dummy = $value$plusargs("mac_addr=%h", mac_addr);
-        network_init(devname, mac_addr);
+        dummy = $value$plusargs("nic_mac_addr=%h", nic_mac_addr);
+        dummy = $value$plusargs("switch_mac_addr=%h", switch_mac_addr);
+        dummy = $value$plusargs("nic_ip_addr=%h", nic_ip_addr);
+        network_init(devname, nic_mac_addr, switch_mac_addr, nic_ip_addr);
     end
 
     always@(posedge clock) begin
@@ -91,11 +98,17 @@ module SimNetwork #(
                 net_in_bits_keep,
                 net_in_bits_last,
                 
-                __macaddr);
-            __macaddr_reg <= __macaddr;
+                _nic_mac_addr,
+                _switch_mac_addr,
+                _nic_ip_addr);
+            _nic_mac_addr_reg <= _nic_mac_addr;
+            _switch_mac_addr_reg <= _switch_mac_addr;
+            _nic_ip_addr_reg <= _nic_ip_addr;
         end
     end
 
-    assign net_macAddr = __macaddr_reg;
+    assign net_nic_mac_addr = _nic_mac_addr_reg;
+    assign net_switch_mac_addr = _switch_mac_addr_reg;
+    assign net_nic_ip_addr = _nic_ip_addr_reg;
 
 endmodule
