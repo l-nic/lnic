@@ -113,13 +113,18 @@ class LNICCoreIO extends Bundle {
   // Msgs going to RxQueues
   val net_out = Decoupled(new StreamChannel(XLEN))
   val meta_out = Valid(new LNICRxMsgMeta)
+  // Core out-of-band coordination with NIC for load balancing
+  val add_context = Flipped(Valid(UInt(LNIC_CONTEXT_BITS.W)))
+  val get_next_msg = Flipped(Valid(UInt(LNIC_CONTEXT_BITS.W)))
 }
 
 /**
  * All IO for the LNIC module.
  */
 class LNICIO(implicit p: Parameters) extends Bundle {
-  val core = new LNICCoreIO()
+  val num_tiles = p(RocketTilesKey).size
+
+  val core = Vec(num_tiles, new LNICCoreIO)
   val net = new NICIO()
 }
 
@@ -141,6 +146,7 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
   val pisa_egress = Module(new Egress)
   val assemble = Module(new LNICAssemble)
   val packetize = Module(new LNICPacketize)
+  val rx_queues = Module(new RxQueues)
 
   val msg_timers = Module(new LNICTimers)
   val credit_reg = Module(new IfElseRaw)
@@ -174,10 +180,18 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
   assemble.io.net_in <> pisa_ingress.io.net_out
   assemble.io.meta_in := pisa_ingress.io.meta_out
 
-  io.core.net_out <> assemble.io.net_out
-  io.core.meta_out := assemble.io.meta_out 
+  // TODO(sibanez): remove this requirement
+  assert(io.core.size == 1, "L-NIC only supports one core!")
 
-  packetize.io.net_in <> io.core.net_in
+  rx_queues.io.net_in <> assemble.io.net_out
+  rx_queues.io.meta_in := assemble.io.meta_out 
+
+  io.core(0).net_out <> rx_queues.io.net_out(0)
+  io.core(0).meta_out := rx_queues.io.meta_out(0)
+  rx_queues.io.add_context(0) := io.core(0).add_context
+  rx_queues.io.get_next_msg(0) := io.core(0).get_next_msg
+
+  packetize.io.net_in(0) <> io.core(0).net_in
 
   arbiter.io.data_in <> packetize.io.net_out
   arbiter.io.data_meta_in := packetize.io.meta_out
