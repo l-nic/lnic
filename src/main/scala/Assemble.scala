@@ -396,7 +396,8 @@ class LNICAssemble(implicit p: Parameters) extends Module {
   val stateDeq = RegInit(sScheduleMsg)
 
   // message buffer read port
-  val deq_buf_word_ptr = scheduled_msgs_deq.bits.buf_ptr // default
+  val deq_buf_word_ptr = Wire(UInt())
+  deq_buf_word_ptr := scheduled_msgs_deq.bits.buf_ptr // default
   val deq_msg_buf_ram_port = msg_buffer_ram(deq_buf_word_ptr)
 
   val msg_desc_reg = RegInit((new RxMsgDescriptor).fromBits(0.U))
@@ -409,30 +410,23 @@ class LNICAssemble(implicit p: Parameters) extends Module {
   io.net_out.bits.last := false.B
   scheduled_msgs_deq.ready := false.B
 
-  // NOTE: this field is used by RxQueues to drive io.net_out.ready
+  // NOTE: this field is used by GlobalRxQueues to drive io.net_out.ready
   io.meta_out.valid := true.B
+  io.meta_out.bits.app_hdr := msg_desc_reg.rx_app_hdr
   io.meta_out.bits.dst_context := msg_desc_reg.dst_context
 
   switch (stateDeq) {
     is (sScheduleMsg) {
       // Wait for a msg descriptor to be scheduled
       when (scheduled_msgs_deq.valid) {
-        // Write app_hdr
-        io.net_out.valid := true.B
-        io.net_out.bits.data := scheduled_msgs_deq.bits.rx_app_hdr.asUInt
-        io.net_out.bits.keep := NET_DP_FULL_KEEP
-        io.net_out.bits.last := false.B
-        io.meta_out.bits.dst_context := scheduled_msgs_deq.bits.dst_context
-        when (io.net_out.ready) {
-          // read the head scheduled msg
-          scheduled_msgs_deq.ready := true.B
-          // init regs
-          msg_desc_reg := scheduled_msgs_deq.bits
-          msg_word_count := 0.U
-          rem_bytes_reg := scheduled_msgs_deq.bits.rx_app_hdr.msg_len
-          // state transition
-          stateDeq := sDeliverMsg
-        }
+        // read the head scheduled msg
+        scheduled_msgs_deq.ready := true.B
+        // init regs
+        msg_desc_reg := scheduled_msgs_deq.bits
+        msg_word_count := 0.U
+        rem_bytes_reg := scheduled_msgs_deq.bits.rx_app_hdr.msg_len
+        // state transition
+        stateDeq := sDeliverMsg
       }
     }
     is (sDeliverMsg) {
