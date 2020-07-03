@@ -75,6 +75,9 @@ object LNICConsts {
   val SCHEDULED_PKTS_Q_DEPTH = 256
   val PACED_PKTS_Q_DEPTH = 256
 
+  // The maximum number of max size msgs that are provisioned to each context in the global RX queues
+  val MAX_RX_MAX_MSGS_PER_CONTEXT = 2
+
   // TODO(sibanez): how best to size these?
   val ARBITER_PKT_BUF_FILTS = MAX_SEG_LEN_BYTES/NET_DP_BYTES * 2
   val ARBITER_META_BUF_FILTS = MAX_SEG_LEN_BYTES/NET_DP_BYTES * 2
@@ -141,12 +144,14 @@ class LNIC(implicit p: Parameters) extends LazyModule {
 class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(outer) {
   val io = IO(new LNICIO)
 
+  val num_cores = p(RocketTilesKey).size
+
   // NIC datapath
   val pisa_ingress = Module(new Ingress)
   val pisa_egress = Module(new Egress)
   val assemble = Module(new LNICAssemble)
   val packetize = Module(new LNICPacketize)
-  val rx_queues = Module(new RxQueues)
+  val rx_queues = Module(new GlobalRxQueues)
 
   val msg_timers = Module(new LNICTimers)
   val credit_reg = Module(new IfElseRaw)
@@ -180,18 +185,17 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
   assemble.io.net_in <> pisa_ingress.io.net_out
   assemble.io.meta_in := pisa_ingress.io.meta_out
 
-  // TODO(sibanez): remove this requirement
-  assert(io.core.size == 1, "L-NIC only supports one core!")
-
   rx_queues.io.net_in <> assemble.io.net_out
   rx_queues.io.meta_in := assemble.io.meta_out 
 
-  io.core(0).net_out <> rx_queues.io.net_out(0)
-  io.core(0).meta_out := rx_queues.io.meta_out(0)
-  rx_queues.io.add_context(0) := io.core(0).add_context
-  rx_queues.io.get_next_msg(0) := io.core(0).get_next_msg
+  for (i <- 0 until num_cores) {
+    io.core(i).net_out <> rx_queues.io.net_out(i)
+    io.core(i).meta_out := rx_queues.io.meta_out(i)
+    rx_queues.io.add_context(i) := io.core(i).add_context
+    rx_queues.io.get_next_msg(i) := io.core(i).get_next_msg
 
-  packetize.io.net_in(0) <> io.core(0).net_in
+    packetize.io.net_in(i) <> io.core(i).net_in
+  }
 
   arbiter.io.data_in <> packetize.io.net_out
   arbiter.io.data_meta_in := packetize.io.meta_out

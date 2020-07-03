@@ -21,11 +21,16 @@ import LNICConsts._
 class AssembleIO extends Bundle {
   val net_in = Flipped(Decoupled(new StreamChannel(NET_DP_BITS)))
   val meta_in = Flipped(Valid(new PISAIngressMetaOut))
-  val net_out = Decoupled(new StreamChannel(XLEN))
-  val meta_out = Valid(new LNICRxMsgMeta)
+  val net_out = Decoupled(new StreamChannel(NET_DP_BITS))
+  val meta_out = Valid(new AssembleMetaOut)
   val get_rx_msg_info = Flipped(new GetRxMsgInfoIO)
 
   override def cloneType = new AssembleIO().asInstanceOf[this.type]
+}
+
+class AssembleMetaOut extends Bundle {
+  val app_hdr = new RxAppHdr
+  val dst_context = UInt(LNIC_CONTEXT_BITS.W)
 }
 
 class BufInfoTableEntry extends Bundle {
@@ -398,23 +403,13 @@ class LNICAssemble(implicit p: Parameters) extends Module {
   val msg_word_count = RegInit(0.U(MSG_LEN_BITS.W))
   val rem_bytes_reg = RegInit(0.U(MSG_LEN_BITS.W))
 
-  // 512-bit and 64-bit words from the msg buffer
-  val buf_net_out_wide = Wire(Decoupled(new StreamChannel(NET_DP_BITS)))
-  val buf_net_out_narrow = Wire(Decoupled(new StreamChannel(XLEN)))
-
   // defaults
-  // 512-bit => 64-bit
-  StreamWidthAdapter(buf_net_out_narrow, // output
-                     buf_net_out_wide)   // input
-  io.net_out <> buf_net_out_narrow
-  io.net_out.bits.data := reverse_bytes(buf_net_out_narrow.bits.data, XBYTES)
-
-  buf_net_out_wide.valid := false.B
-  buf_net_out_wide.bits.keep := NET_DP_FULL_KEEP
-  buf_net_out_wide.bits.last := false.B
+  io.net_out.valid := false.B
+  io.net_out.bits.keep := NET_DP_FULL_KEEP
+  io.net_out.bits.last := false.B
   scheduled_msgs_deq.ready := false.B
 
-  // NOTE: This dst_context metadata field is used by the RxQueues Module to drive io.net_out.ready
+  // NOTE: this field is used by RxQueues to drive io.net_out.ready
   io.meta_out.valid := true.B
   io.meta_out.bits.dst_context := msg_desc_reg.dst_context
 
@@ -425,7 +420,7 @@ class LNICAssemble(implicit p: Parameters) extends Module {
         // Write app_hdr
         io.net_out.valid := true.B
         io.net_out.bits.data := scheduled_msgs_deq.bits.rx_app_hdr.asUInt
-        io.net_out.bits.keep := NET_CPU_FULL_KEEP
+        io.net_out.bits.keep := NET_DP_FULL_KEEP
         io.net_out.bits.last := false.B
         io.meta_out.bits.dst_context := scheduled_msgs_deq.bits.dst_context
         when (io.net_out.ready) {
@@ -441,15 +436,15 @@ class LNICAssemble(implicit p: Parameters) extends Module {
       }
     }
     is (sDeliverMsg) {
-      buf_net_out_wide.valid := true.B
+      io.net_out.valid := true.B
       // read current buffer word
-      buf_net_out_wide.bits.data := deq_msg_buf_ram_port
+      io.net_out.bits.data := deq_msg_buf_ram_port
       val is_last_word = rem_bytes_reg <= NET_DP_BYTES.U
-      buf_net_out_wide.bits.keep := Mux(is_last_word,
-                                        (1.U << rem_bytes_reg) - 1.U,
-                                        NET_DP_FULL_KEEP)
-      buf_net_out_wide.bits.last := is_last_word
-      when (buf_net_out_wide.ready) {
+      io.net_out.bits.keep := Mux(is_last_word,
+                                  (1.U << rem_bytes_reg) - 1.U,
+                                  NET_DP_FULL_KEEP)
+      io.net_out.bits.last := is_last_word
+      when (io.net_out.ready) {
         // move to the next word
         deq_buf_word_ptr := msg_desc_reg.buf_ptr + msg_word_count + 1.U
         msg_word_count := msg_word_count + 1.U
