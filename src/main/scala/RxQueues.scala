@@ -238,6 +238,7 @@ class GlobalRxQueues(implicit p: Parameters) extends Module {
     target_core := PriorityEncoder(available_cores)
     val reg_target_core = Reg(UInt())
     val reg_deq_context = Reg(UInt(LNIC_CONTEXT_BITS.W))
+    deq_context := reg_deq_context
 
     val get_next_msg_valids = VecInit(get_next_msg_cmd_deq.map(_.valid))
     val new_msg_core = Wire(UInt())
@@ -318,7 +319,7 @@ class GlobalRxQueues(implicit p: Parameters) extends Module {
       }
       is (sDeqFinish) {
         // write msg body
-        val data_valid = word_count_table(reg_target_core) > 0.U
+        val data_valid = word_count_table(reg_deq_context) > 0.U
         val meta_out = io.meta_out(reg_target_core)
         meta_out.valid := data_valid
         meta_out.bits.dst_context := reg_deq_context
