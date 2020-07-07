@@ -75,6 +75,9 @@ object LNICConsts {
   val SCHEDULED_PKTS_Q_DEPTH = 256
   val PACED_PKTS_Q_DEPTH = 256
 
+  // this is used to decide how many bits of the src IP to look at when allocating rx msg IDs
+  val MAX_NUM_HOSTS = 128
+
   // The maximum number of max size msgs that are provisioned to each context in the global RX queues
   val MAX_RX_MAX_MSGS_PER_CONTEXT = 2
 

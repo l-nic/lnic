@@ -40,9 +40,18 @@ class BufInfoTableEntry extends Bundle {
   val size_class = UInt(SIZE_CLASS_BITS.W)
 }
 
-class RxMsgIdTableEntry extends Bundle {
+class RxMsgKey(val src_ip_bits: Int, val msg_id_bits: Int) extends Bundle {
+  val src_ip = UInt(src_ip_bits.W) // truncated version
+  val tx_msg_id = UInt(msg_id_bits.W) // truncated version
+
+  override def cloneType = new RxMsgKey(src_ip_bits, msg_id_bits).asInstanceOf[this.type]
+}
+
+class RxMsgIdTableEntry(val msg_id_bits: Int) extends Bundle {
   val valid = Bool()
-  val rx_msg_id = UInt(MSG_ID_BITS.W)
+  val rx_msg_id = UInt(msg_id_bits.W)
+
+  override def cloneType = new RxMsgIdTableEntry(msg_id_bits).asInstanceOf[this.type]
 }
 
 // The first word delivered to the application at the start of
@@ -76,7 +85,10 @@ class LNICAssemble(implicit p: Parameters) extends Module {
   val rx_msg_id_freelist = Module(new FreeList(rx_msg_ids))
   // table mapping unique msg identifier to rx_msg_id
   // TODO(sibanez): this should eventually turn into a D-left exact-match table
-  val rx_msg_id_table = Module(new TrueDualPortRAM((new RxMsgIdTableEntry).getWidth, NUM_MSG_BUFFERS))
+  val msg_id_bits = log2Up(NUM_MSG_BUFFERS)
+  require(msg_id_bits <= MSG_ID_BITS)
+  val src_ip_bits = log2Up(MAX_NUM_HOSTS)
+  val rx_msg_id_table = Module(new TrueDualPortRAM((new RxMsgIdTableEntry(msg_id_bits)).getWidth, 1<<(msg_id_bits + src_ip_bits)))
   rx_msg_id_table.io.clock := clock
   rx_msg_id_table.io.reset := reset
   rx_msg_id_table.io.portA.we := false.B
@@ -141,18 +153,19 @@ class LNICAssemble(implicit p: Parameters) extends Module {
 
   // TODO(sibanez): update msg_key to include src_ip and src_context,
   //   which requires rx_msg_id_table to become a D-left lookup table.
-  val msg_key = Wire(UInt())
+  val msg_key = Wire(new RxMsgKey(src_ip_bits, msg_id_bits))
   val msg_key_reg = RegNext(msg_key)
-  val cur_rx_msg_id_table_entry = Wire(new RxMsgIdTableEntry())
+  val cur_rx_msg_id_table_entry = Wire(new RxMsgIdTableEntry(msg_id_bits))
 
   // defaults
-  msg_key := get_rx_msg_info_req_reg.bits.tx_msg_id
-  rx_msg_id_table.io.portA.addr := msg_key
+  msg_key.src_ip := get_rx_msg_info_req_reg.bits.src_ip // truncated
+  msg_key.tx_msg_id := get_rx_msg_info_req_reg.bits.tx_msg_id // truncated
+  rx_msg_id_table.io.portA.addr := msg_key.asUInt
   io.get_rx_msg_info.resp.valid := false.B
 
   // Initialize rx_msg_id_table so that all entries are invalid
   val init_done_reg = RegInit(false.B)
-  MemHelpers.memory_init(rx_msg_id_table.io.portA, NUM_MSG_BUFFERS, 0.U, init_done_reg)
+  MemHelpers.memory_init(rx_msg_id_table.io.portA, 1<<(src_ip_bits + msg_id_bits), 0.U, init_done_reg)
 
   // True if both an rx_msg_id and buffer are available for this msg
   val allocation_success_reg = RegInit(false.B)
@@ -182,11 +195,11 @@ class LNICAssemble(implicit p: Parameters) extends Module {
       // return extern call response
       io.get_rx_msg_info.resp.valid := !(reset.toBool)
       // Get result of reading the rx_msg_id_table
-      cur_rx_msg_id_table_entry := (new RxMsgIdTableEntry).fromBits(rx_msg_id_table.io.portA.dout)
+      cur_rx_msg_id_table_entry := (new RxMsgIdTableEntry(msg_id_bits)).fromBits(rx_msg_id_table.io.portA.dout)
       when (cur_rx_msg_id_table_entry.valid) {
         // This msg has already been allocated an rx_msg_id
         io.get_rx_msg_info.resp.bits.fail := false.B
-        io.get_rx_msg_info.resp.bits.rx_msg_id := cur_rx_msg_id_table_entry.rx_msg_id
+        io.get_rx_msg_info.resp.bits.rx_msg_id := Cat(0.U((MSG_ID_BITS - msg_id_bits).W), cur_rx_msg_id_table_entry.rx_msg_id)
         io.get_rx_msg_info.resp.bits.is_new_msg := false.B
       } .elsewhen (allocation_success_reg) {
         // This is a new msg and we can allocate a buffer and rx_msg_id
@@ -198,10 +211,10 @@ class LNICAssemble(implicit p: Parameters) extends Module {
         assert(rx_msg_id_freelist.io.deq.valid, "There is an available buffer but not an available rx_msg_id?")
         rx_msg_id_freelist.io.deq.ready := true.B
         // update rx_msg_id_table
-        val new_rx_msg_id_table_entry = Wire(new RxMsgIdTableEntry())
+        val new_rx_msg_id_table_entry = Wire(new RxMsgIdTableEntry(msg_id_bits))
         new_rx_msg_id_table_entry.valid := true.B
-        new_rx_msg_id_table_entry.rx_msg_id := rx_msg_id
-        rx_msg_id_table.io.portA.addr := msg_key_reg
+        new_rx_msg_id_table_entry.rx_msg_id := rx_msg_id // truncate
+        rx_msg_id_table.io.portA.addr := msg_key_reg.asUInt
         rx_msg_id_table.io.portA.we := true.B
         rx_msg_id_table.io.portA.din := new_rx_msg_id_table_entry.asUInt
         // update buf_info_table
@@ -454,7 +467,10 @@ class LNICAssemble(implicit p: Parameters) extends Module {
           target_buf_freelist_io.enq.bits := msg_desc_reg.buf_ptr
           // mark the corresponding entry in rx_msg_id_table as invalid
           // TODO(sibanez): this will eventually turn into a D-left table ...
-          rx_msg_id_table.io.portB.addr := msg_desc_reg.tx_msg_id
+          val rx_msg_key = Wire(new RxMsgKey(src_ip_bits, msg_id_bits))
+          rx_msg_key.src_ip := msg_desc_reg.rx_app_hdr.src_ip // truncate
+          rx_msg_key.tx_msg_id := msg_desc_reg.tx_msg_id // truncate
+          rx_msg_id_table.io.portB.addr := rx_msg_key.asUInt
           rx_msg_id_table.io.portB.we   := true.B
           rx_msg_id_table.io.portB.din  := 0.U
         }
