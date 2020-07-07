@@ -233,9 +233,42 @@ class GlobalRxQueues(implicit p: Parameters) extends Module {
     enq_cmd_context := enq_cmd_deq.bits
     val core_bitmap = core_table(enq_cmd_context)
     val candidate_cores = VecInit(msg_count_table(enq_cmd_context).map( _ < MAX_OUTSTANDING_MSGS.U))
+    // all cores with msg count < MAX_OUTSTANDING_MSGS that are running this context
     val available_cores = core_bitmap & candidate_cores.asUInt
+    val core_ids = Wire(Vec(num_cores, UInt((log2Up(num_cores).W))))
+    for (i <- 0 until num_cores) { core_ids(i) := i.U }
+    // find the core with the smallest msg count that is running this context
     val target_core = Wire(UInt())
-    target_core := PriorityEncoder(available_cores)
+    val result = msg_count_table(enq_cmd_context).zip(core_ids).reduce( (tuple1, tuple2) => {
+      val count1 = tuple1._1
+      val cid1 = tuple1._2
+      val count2 = tuple2._1
+      val cid2 = tuple2._2
+
+      val c1_valid = (UIntToOH(cid1) & core_bitmap) > 0.U
+      val c2_valid = (UIntToOH(cid2) & core_bitmap) > 0.U
+
+      val count = Wire(UInt())
+      val cid = Wire(UInt())
+      when (c1_valid && c2_valid) {
+        when (count2 < count1) {
+          count := count2
+          cid := cid2
+        } .otherwise {
+          count := count1
+          cid := cid1
+        }        
+      } .elsewhen (c2_valid) {
+        count := count2
+        cid := cid2
+      } .otherwise {
+        count := count1
+        cid := cid1
+      }
+      (count, cid)
+    })
+    target_core := result._2
+
     val reg_target_core = Reg(UInt())
     val reg_deq_context = Reg(UInt(LNIC_CONTEXT_BITS.W))
     deq_context := reg_deq_context
