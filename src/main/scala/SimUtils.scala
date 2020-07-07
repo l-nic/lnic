@@ -9,6 +9,7 @@ import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.NetworkHelpers._
 import NICIO._
 import NICIOvonly._
+import LNICConsts._
 
 
 /* Test Modules */
