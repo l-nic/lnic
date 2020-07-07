@@ -74,6 +74,12 @@ object LNICConsts {
   val SCHEDULED_PKTS_Q_DEPTH = 256
   val PACED_PKTS_Q_DEPTH = 256
 
+  // this is used to decide how many bits of the src IP to look at when allocating rx msg IDs
+  val MAX_NUM_HOSTS = 128
+
+  // The maximum number of max size msgs that are provisioned to each context in the global RX queues
+  val MAX_RX_MAX_MSGS_PER_CONTEXT = 2
+
   // TODO(sibanez): how best to size these?
   val ARBITER_PKT_BUF_FILTS = MAX_SEG_LEN_BYTES/NET_DP_BYTES * 2
   val ARBITER_META_BUF_FILTS = MAX_SEG_LEN_BYTES/NET_DP_BYTES * 2
@@ -166,13 +172,18 @@ class LNICCoreIO extends Bundle {
   // Msgs going to RxQueues
   val net_out = Decoupled(new StreamChannel(XLEN))
   val meta_out = Valid(new LNICRxMsgMeta)
+  // Core out-of-band coordination with NIC for load balancing
+  val add_context = Flipped(Valid(UInt(LNIC_CONTEXT_BITS.W)))
+  val get_next_msg = Flipped(Valid(UInt(LNIC_CONTEXT_BITS.W)))
 }
 
 /**
  * All IO for the LNIC module.
  */
 class LNICIO(implicit p: Parameters) extends Bundle {
-  val core = new LNICCoreIO()
+  val num_tiles = p(RocketTilesKey).size
+
+  val core = Vec(num_tiles, new LNICCoreIO)
   val net = new NICIO()
 }
 
@@ -189,11 +200,14 @@ class LNIC(implicit p: Parameters) extends LazyModule {
 class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(outer) {
   val io = IO(new LNICIO)
 
+  val num_cores = p(RocketTilesKey).size
+
   // NIC datapath
   val pisa_ingress = Module(new Ingress)
   val pisa_egress = Module(new Egress)
   val assemble = Module(new LNICAssemble)
   val packetize = Module(new LNICPacketize)
+  val rx_queues = Module(new GlobalRxQueues)
 
   val msg_timers = Module(new LNICTimers)
   val credit_reg = Module(new IfElseRaw)
@@ -227,10 +241,17 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
   assemble.io.net_in <> pisa_ingress.io.net_out
   assemble.io.meta_in := pisa_ingress.io.meta_out
 
-  io.core.net_out <> assemble.io.net_out
-  io.core.meta_out := assemble.io.meta_out 
+  rx_queues.io.net_in <> assemble.io.net_out
+  rx_queues.io.meta_in := assemble.io.meta_out 
 
-  packetize.io.net_in <> io.core.net_in
+  for (i <- 0 until num_cores) {
+    io.core(i).net_out <> rx_queues.io.net_out(i)
+    io.core(i).meta_out := rx_queues.io.meta_out(i)
+    rx_queues.io.add_context(i) := io.core(i).add_context
+    rx_queues.io.get_next_msg(i) := io.core(i).get_next_msg
+
+    packetize.io.net_in(i) <> io.core(i).net_in
+  }
 
   arbiter.io.data_in <> packetize.io.net_out
   arbiter.io.data_meta_in := packetize.io.meta_out

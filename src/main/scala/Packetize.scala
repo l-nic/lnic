@@ -5,6 +5,7 @@ import Chisel._
 import chisel3.{VecInit, SyncReadMem}
 import chisel3.experimental._
 import freechips.rocketchip.config.Parameters
+import freechips.rocketchip.subsystem.RocketTilesKey
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.rocket.NetworkHelpers._
 import freechips.rocketchip.rocket.LNICRocketConsts._
@@ -20,8 +21,10 @@ import LNICConsts._
  *   - Store msgs and transmit pkts, also support retransmitting pkts when told to do so
  */
 
-class PacketizeIO extends Bundle {
-  val net_in = Flipped(Decoupled(new LNICTxMsgWord))
+class PacketizeIO(implicit p: Parameters) extends Bundle {
+  val num_cores = p(RocketTilesKey).size
+
+  val net_in = Vec(num_cores, Flipped(Decoupled(new LNICTxMsgWord)))
   val net_out = Decoupled(new StreamChannel(NET_DP_BITS))
   val meta_out = Valid(new PISAEgressMetaIn)
   // Events
@@ -60,6 +63,7 @@ class ContextEnqState extends Bundle {
 class LNICPacketize(implicit p: Parameters) extends Module {
   val lnic_params = p(LNICKey).get
   val num_contexts = p(LNICRocketKey).get.maxNumContexts
+  val num_cores = p(RocketTilesKey).size
 
   val io = IO(new PacketizeIO)
 
@@ -124,12 +128,12 @@ class LNICPacketize(implicit p: Parameters) extends Module {
    * Tasks:
    *   - Wait for MsgWord from the TxQueue
    *   - When a MsgWord arrives, record msg_len and keep track of remaining_bytes
-   *   - One the first word of a msg, allocate a buffer and tx_msg_id
+   *   - On the first word of a msg, allocate a buffer and tx_msg_id
    *   - For subsequent words of the msg, write into the appropriate buffer location
    *   - When either (1) an MTU has been accumulated, or (2) the full msg has arrived,
    *     schedule a tx pkt descriptor for transmission
    *
-   * NOTE: All state variables are per-context
+   * NOTE: All state variables are per-context and per-core
    *
    * Description of states:
    * sWaitAppHdr:
@@ -144,27 +148,49 @@ class LNICPacketize(implicit p: Parameters) extends Module {
    *     schedule a tx pkt descriptor for transmission
    */
   val sWaitAppHdr :: sWriteMsg :: Nil = Enum(2)
-  // need one state per context
-  val enqStates = RegInit(VecInit(Seq.fill(num_contexts)(sWaitAppHdr)))
+  // need one state per-context and per-core
+  val enqStates = Reg(Vec(num_contexts, Vec(num_cores, UInt())))
+  when (reset.toBool) {
+    for (i <- 0 until num_contexts) {
+      for (j <- 0 until num_cores) {
+        enqStates(i)(j) := sWaitAppHdr
+      }
+    }
+  }
+
+  // Select core to receive msg word from
+  val net_in_valids = VecInit(io.net_in.map(_.valid))
+  val selected_core_reg = RegInit(0.U)
+  val selected_core = Wire(UInt())
+  when (net_in_valids.asUInt > 0.U) {
+    val core = PriorityEncoder(net_in_valids.asUInt)
+    selected_core_reg := core
+    selected_core := core
+  } .otherwise {
+    selected_core := selected_core_reg
+  }
 
   // NOTE: register the ID of the last context that enqueued a word. We do this cuz
   //   we want to continuously read the credit and toBtx state.
   val enq_context_reg = Reg(UInt(LNIC_CONTEXT_BITS.W))
-  when (io.net_in.valid) {
-    enq_context_reg := io.net_in.bits.src_context
+  when (io.net_in(selected_core).valid) {
+    enq_context_reg := io.net_in(selected_core).bits.src_context
   }
 
   // defaults
   val enq_context = Wire(UInt(LNIC_CONTEXT_BITS.W))
-  enq_context := Mux(io.net_in.valid,
-                     io.net_in.bits.src_context,
+  enq_context := Mux(io.net_in(selected_core).valid,
+                     io.net_in(selected_core).bits.src_context,
                      enq_context_reg)
-  io.net_in.ready := true.B
   init_scheduled_pkts_enq.valid := false.B
   io.schedule.valid := false.B
+  // default - do not read from any cores
+  io.net_in.foreach { net_in =>
+    net_in.ready := false.B
+  }
 
   val tx_app_hdr = Wire(new TxAppHdr)
-  tx_app_hdr := (new TxAppHdr).fromBits(io.net_in.bits.data)
+  tx_app_hdr := (new TxAppHdr).fromBits(io.net_in(selected_core).bits.data)
 
   // bitmap of valid signals for all size classes
   val free_classes = VecInit(size_class_freelists_io.map(_.deq.valid))
@@ -173,24 +199,32 @@ class LNICPacketize(implicit p: Parameters) extends Module {
   // bitmap indicates classes with available buffers that are large enough
   val available_classes = free_classes.asUInt & candidate_classes.asUInt
 
-  // Per-context enq state
-  val context_enq_state = RegInit(VecInit(Seq.fill(num_contexts)((new ContextEnqState).fromBits(0.U))))
+  // Per-context, per-core enq state
+  val context_enq_state = Reg(Vec(num_contexts, Vec(num_cores, new ContextEnqState)))
+  when (reset.toBool) {
+    for (i <- 0 until num_contexts) {
+      for (j <- 0 until num_cores) {
+        context_enq_state(i)(j) := (new ContextEnqState).fromBits(0.U)
+      }
+    }
+  }
 
   // msg buffer write port
   val enq_buf_ptr = Wire(UInt(BUF_PTR_BITS.W))
   val enq_msg_buf_ram_port = msg_buffer_ram(enq_buf_ptr)
 
   val tx_msg_id = Wire(UInt(MSG_ID_BITS.W))
+  val tx_msg_id_reg = Reg(next = tx_msg_id)
   tx_msg_id := tx_msg_id_freelist.io.deq.bits // default
 
   credit_table.io.portA.addr := tx_msg_id
   toBtx_table.io.portA.addr := tx_msg_id
 
-  switch (enqStates(enq_context)) {
+  switch (enqStates(enq_context)(selected_core)) {
     is (sWaitAppHdr) {
       // assert back pressure to the CPU if there are no available buffers for this msg
-      io.net_in.ready := (available_classes > 0.U)
-      when (io.net_in.valid && io.net_in.ready) {
+      io.net_in(selected_core).ready := (available_classes > 0.U)
+      when (io.net_in(selected_core).valid && io.net_in(selected_core).ready) {
         assert (tx_msg_id_freelist.io.deq.valid, "There is an available buffer but not an available tx_msg_id?")
         // read tx_msg_id_freelist
         tx_msg_id_freelist.io.deq.ready := true.B
@@ -207,7 +241,7 @@ class LNICPacketize(implicit p: Parameters) extends Module {
         msg_desc.tx_app_hdr := tx_app_hdr
         msg_desc.src_context := enq_context
         // record per-context enqueue state
-        val ctx_state = context_enq_state(enq_context)
+        val ctx_state = context_enq_state(enq_context)(selected_core)
         ctx_state.msg_desc := msg_desc
         ctx_state.pkt_offset := 0.U
         ctx_state.rem_bytes := tx_app_hdr.msg_len
@@ -222,28 +256,30 @@ class LNICPacketize(implicit p: Parameters) extends Module {
         toBtx_table.io.portA.din := 0.U // no pkts have been written yet
         // NOTE: we could also initialize max_tx_pkt_offset_table here but that would require
         //   an extra port so we will do that initialization in the dequeue state machine.
-        // initialize timer
+        // schedule timer
         io.schedule.valid := true.B
         io.schedule.bits.msg_id := tx_msg_id
         io.schedule.bits.delay := lnic_params.timeoutCycles.U
         io.schedule.bits.metadata.rtx_offset := 0.U
         io.schedule.bits.metadata.msg_desc := msg_desc
         // state transition
-        enqStates(enq_context) := sWriteMsg
+        enqStates(enq_context)(selected_core) := sWriteMsg
       }
     }
     is (sWriteMsg) {
-      val ctx_state = context_enq_state(enq_context)
+      val ctx_state = context_enq_state(enq_context)(selected_core)
       tx_msg_id := ctx_state.msg_desc.tx_msg_id
-      // wait for a MsgWord to arrive
-      when (io.net_in.valid) {
+      // wait for tx_msg_id to converge (so that we can read credit and toBtx state)
+      io.net_in(selected_core).ready := (tx_msg_id === tx_msg_id_reg)
+      // wait for a MsgWord to arrive 
+      when (io.net_in(selected_core).valid && io.net_in(selected_core).ready) {
         // compute where to write MsgWord in the buffer
         val word_offset_bits = log2Up(NET_DP_BITS/XLEN)
         val word_offset = ctx_state.word_count(word_offset_bits-1, 0)
         val word_ptr = ctx_state.word_count(15, word_offset_bits)
         enq_buf_ptr := ctx_state.msg_desc.buf_ptr + word_ptr
-        // TODO(sibanez): check that this properly implements a sub-word write
-        enq_msg_buf_ram_port(word_offset) := reverse_bytes(io.net_in.bits.data, XBYTES)
+        // Perform a sub-word write
+        enq_msg_buf_ram_port(word_offset) := reverse_bytes(io.net_in(selected_core).bits.data, XBYTES)
         // build tx pkt descriptor just in case we need to schedule a pkt
         val tx_pkt_desc = Wire(new TxPktDescriptor)
         tx_pkt_desc.msg_desc := ctx_state.msg_desc
@@ -252,9 +288,6 @@ class LNICPacketize(implicit p: Parameters) extends Module {
         val is_last_word = ctx_state.rem_bytes <= XBYTES.U
         val is_full_pkt = ctx_state.pkt_bytes + XBYTES.U === MAX_SEG_LEN_BYTES.U
 
-        // TODO(sibanez): this part is kinda sketchy - read result doesn't show up until the cycle after
-        //   driving the address line (tx_msg_id). So if there are context switches b/w threads
-        //   this may read the wrong values?
         // get credit state read result
         val enq_credit = Wire(UInt(CREDIT_BITS.W))
         enq_credit := credit_table.io.portA.dout
@@ -292,7 +325,7 @@ class LNICPacketize(implicit p: Parameters) extends Module {
 
         when (is_last_word) {
           // state transition
-          enqStates(enq_context) := sWaitAppHdr
+          enqStates(enq_context)(selected_core) := sWaitAppHdr
         }
 
         // update context state variables
