@@ -166,13 +166,9 @@ class LNICAssemble(implicit p: Parameters) extends Module {
 
   // Initialize rx_msg_id_table so that all entries are invalid
   val init_done_reg = RegInit(false.B)
-  val init_done_reg_reg = RegNext(init_done_reg)
   MemHelpers.memory_init(rx_msg_id_table.io.portA, 1<<(src_ip_bits + msg_id_bits), 0.U, init_done_reg)
 
   io.reset_done := init_done_reg
-  when (init_done_reg && !init_done_reg_reg) {
-    printf("rx_msg_id_table reset done!")
-  }
 
   // True if both an rx_msg_id and buffer are available for this msg
   val allocation_success_reg = RegInit(false.B)

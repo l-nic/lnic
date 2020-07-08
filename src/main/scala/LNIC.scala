@@ -162,6 +162,14 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
   val pkt_gen = Module(new LNICPktGen)
   val arbiter = Module(new LNICArbiter)
 
+  val lnic_reset_done = Wire(Bool())
+  val lnic_reset_done_reg = RegNext(lnic_reset_done)
+  lnic_reset_done := assemble.io.reset_done
+
+  when (lnic_reset_done && !lnic_reset_done_reg) {
+    printf("L-NIC reset done!\n")
+  }
+
   ////////////////////////////////
   /* Event / Extern Connections */
   ////////////////////////////////
@@ -193,7 +201,7 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
   rx_queues.io.meta_in := assemble.io.meta_out 
 
   for (i <- 0 until num_cores) {
-    io.core(i).reset_done := assemble.io.reset_done
+    io.core(i).reset_done := lnic_reset_done
 
     io.core(i).net_out <> rx_queues.io.net_out(i)
     io.core(i).meta_out := rx_queues.io.meta_out(i)
