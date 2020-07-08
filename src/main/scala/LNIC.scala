@@ -122,6 +122,7 @@ class LNICCoreIO extends Bundle {
   // Core out-of-band coordination with NIC for load balancing
   val add_context = Flipped(Valid(UInt(LNIC_CONTEXT_BITS.W)))
   val get_next_msg = Flipped(Valid(UInt(LNIC_CONTEXT_BITS.W)))
+  val reset_done = Output(Bool())
 }
 
 /**
@@ -192,6 +193,8 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
   rx_queues.io.meta_in := assemble.io.meta_out 
 
   for (i <- 0 until num_cores) {
+    io.core(i).reset_done := assemble.io.reset_done
+
     io.core(i).net_out <> rx_queues.io.net_out(i)
     io.core(i).meta_out := rx_queues.io.meta_out(i)
     rx_queues.io.add_context(i) := io.core(i).add_context
