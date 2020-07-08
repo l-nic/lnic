@@ -709,7 +709,7 @@ class LNICPacketize(implicit p: Parameters) extends Module {
 
       // find any pkts to retransmit
       val rtx_pkts_mask = Wire(UInt(MAX_SEGS_PER_MSG.W))
-      rtx_pkts_mask := (1.U << timeout_reg_1.bits.metadata.rtx_offset) - 1.U
+      rtx_pkts_mask := (1.U << (timeout_reg_1.bits.metadata.rtx_offset + 1.U)) - 1.U
       val rtx_pkts = ~delivered_bitmap & rtx_pkts_mask
       when (rtx_pkts > 0.U && !reset.toBool) {
         // there are pkts to retransmit
