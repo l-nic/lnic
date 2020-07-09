@@ -113,7 +113,7 @@ class StreamWidener[T <: Data](inW: Int, outW: Int, metaType: T) extends Module 
   val s_recv_first :: s_recv_finish :: s_send :: Nil = Enum(3)
   val state = RegInit(s_recv_first)
 
-  io.in.ready := (state === s_recv_first) || (state === s_recv_finish)
+  io.in.ready := (state === s_recv_first) || (state === s_recv_finish) || (state === s_send && io.out.ready)
   io.out.valid := (state === s_send) && !(reset.toBool)
   io.out.bits.data := data.asUInt
   io.out.bits.keep := keep.asUInt
@@ -131,17 +131,25 @@ class StreamWidener[T <: Data](inW: Int, outW: Int, metaType: T) extends Module 
       meta_valid := io.meta_in.valid
     }
     when (io.in.bits.last || idx === (inBeats - 1).U) {
+      idx := 0.U
       last := io.in.bits.last
       state := s_send
     }
   }
 
   when (io.out.fire()) {
-    idx := 0.U
-    keep.foreach(_ := 0.U)
+    // reset keep bits, unless it is immediately overwritten
+    for (i <- 0 until inBeats) {
+      when (i.U === 0.U && io.in.fire()) {
+        keep(i) := io.in.bits.keep
+      } .otherwise {
+        keep(i) := 0.U
+      }
+    }
     state := s_recv_first
   }
 }
+
 
 object StreamWidthAdapter {
   def apply[T <: Data](out: DecoupledIO[StreamChannel], meta_out: T, in: DecoupledIO[StreamChannel], meta_in: T) {
