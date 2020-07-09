@@ -121,6 +121,12 @@ class StreamWidener[T <: Data](inW: Int, outW: Int, metaType: T) extends Module 
   io.meta_out.bits := meta
   io.meta_out.valid := meta_valid
 
+  when (io.out.fire()) {
+    // defaults - these updates may be overwritten when io.in also fires
+    keep.foreach(_ := 0.U)
+    state := s_recv_first
+  }
+
   when (io.in.fire()) {
     idx := idx + 1.U
     data(idx) := io.in.bits.data
@@ -135,18 +141,6 @@ class StreamWidener[T <: Data](inW: Int, outW: Int, metaType: T) extends Module 
       last := io.in.bits.last
       state := s_send
     }
-  }
-
-  when (io.out.fire()) {
-    // reset keep bits, unless it is immediately overwritten
-    for (i <- 0 until inBeats) {
-      when (i.U === 0.U && io.in.fire()) {
-        keep(i) := io.in.bits.keep
-      } .otherwise {
-        keep(i) := 0.U
-      }
-    }
-    state := s_recv_first
   }
 }
 
