@@ -9,9 +9,13 @@
 
 std::unordered_map<std::string, NetworkDevice*> netdev_map;
 
-extern "C" void network_init(const char *devname)
+extern "C" void network_init(
+        const char   *devname,
+        long long    nic_mac_addr,
+        long long    switch_mac_addr,
+        int          nic_ip_addr)
 {
-    netdev_map[std::string(devname)] = new NetworkDevice(devname);
+    netdev_map[std::string(devname)] = new NetworkDevice(devname, nic_mac_addr, switch_mac_addr, nic_ip_addr);
 }
 
 extern "C" void network_tick(
@@ -27,7 +31,11 @@ extern "C" void network_tick(
         unsigned char rx_ready,
         long long     *rx_data,
         char          *rx_keep,
-        unsigned char *rx_last)
+        unsigned char *rx_last,
+        
+        long long     *nic_mac_addr,
+        long long     *switch_mac_addr,
+        int           *nic_ip_addr)
 {
     NetworkDevice *netdev = netdev_map[std::string(devname)];
 
@@ -47,6 +55,10 @@ extern "C" void network_tick(
     *rx_data = netdev->rx_data();
     *rx_keep = netdev->rx_keep();
     *rx_last = netdev->rx_last();
+
+    *nic_mac_addr = netdev->nic_mac_addr();
+    *switch_mac_addr = netdev->switch_mac_addr();
+    *nic_ip_addr = netdev->nic_ip_addr();
 
     netdev->tick_rx(rx_ready);
 

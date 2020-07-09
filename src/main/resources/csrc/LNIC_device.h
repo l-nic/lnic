@@ -12,7 +12,7 @@
 
 class NetworkDevice {
   public:
-    NetworkDevice(const char *ifname);
+    NetworkDevice(const char *ifname, long long nic_mac_addr, long long switch_mac_addr, int nic_ip_addr);
     ~NetworkDevice();
 
     void tick_tx(bool tx_valid,
@@ -28,6 +28,10 @@ class NetworkDevice {
     uint8_t rx_keep() { return (rx_valid()) ? rx_flits.front().keep : 0; }
     bool rx_last() { return (rx_valid()) ? rx_flits.front().last : false; }
 
+    long long nic_mac_addr() { return _nic_mac_addr; }
+    long long switch_mac_addr() { return _switch_mac_addr; }
+    int nic_ip_addr() { return _nic_ip_addr; }
+
   protected:
     int fd;
     std::queue<network_flit> tx_flits;
@@ -35,6 +39,10 @@ class NetworkDevice {
 
     std::queue<network_packet*> tx_packets;
     std::queue<network_packet*> rx_packets;
+
+    long long _nic_mac_addr;
+    long long _switch_mac_addr;
+    int _nic_ip_addr;
 
 };
 

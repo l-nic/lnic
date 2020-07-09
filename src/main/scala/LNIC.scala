@@ -9,7 +9,6 @@ import freechips.rocketchip.subsystem._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.rocket.LNICRocketConsts._
-import icenet.{NICIO, NICIOvonly}
 
 import scala.collection.mutable.LinkedHashMap
 
@@ -26,9 +25,9 @@ object LNICConsts {
   def NET_DP_FULL_KEEP = ~0.U(NET_DP_BYTES.W)
   def NET_CPU_FULL_KEEP = ~0.U(XBYTES.W)
 
-  val SWITCH_MAC_ADDR = "h085566778808".U
-  val NIC_MAC_ADDR = "h081122334408".U
-  val NIC_IP_ADDR = "h0A000001".U // 10.0.0.1
+  //val NIC_MAC_ADDR = "h081122334408".U
+  //val SWITCH_MAC_ADDR = "h085566778808".U
+  //val NIC_IP_ADDR = "h0A000001".U // 10.0.0.1
 
   val IPV4_TYPE = "h0800".U(16.W)
   val LNIC_PROTO = "h99".U(8.W)
@@ -101,6 +100,9 @@ object LNICConsts {
 
   // NOTE: these are only used for the Simulation Timestamp/Latency measurement module
   val TEST_CONTEXT_ID = 0x1234.U(LNIC_CONTEXT_BITS.W)
+
+  val ETH_MAC_BITS = 48
+  val NET_IF_WIDTH = 64
 }
 
 case class LNICParams(
@@ -109,6 +111,57 @@ case class LNICParams(
 )
 
 case object LNICKey extends Field[Option[LNICParams]](None)
+
+class NICIO extends StreamIO(LNICConsts.NET_IF_WIDTH) {
+  val nic_mac_addr = Input(UInt(LNICConsts.ETH_MAC_BITS.W))
+  val switch_mac_addr = Input(UInt(LNICConsts.ETH_MAC_BITS.W))
+  val nic_ip_addr = Input(UInt(32.W))
+
+  override def cloneType = (new NICIO).asInstanceOf[this.type]
+}
+
+class NICIOvonly extends Bundle {
+  val in = Flipped(Valid(new StreamChannel(LNICConsts.NET_IF_WIDTH)))
+  val out = Valid(new StreamChannel(LNICConsts.NET_IF_WIDTH))
+  val nic_mac_addr = Input(UInt(LNICConsts.ETH_MAC_BITS.W))
+  val switch_mac_addr = Input(UInt(LNICConsts.ETH_MAC_BITS.W))
+  val nic_ip_addr = Input(UInt(32.W))
+
+  override def cloneType = (new NICIOvonly).asInstanceOf[this.type]
+}
+
+object NICIOvonly {
+  def apply(nicio: NICIO): NICIOvonly = {
+    val vonly = Wire(new NICIOvonly)
+    vonly.out.valid := nicio.out.valid
+    vonly.out.bits  := nicio.out.bits
+    nicio.out.ready := true.B
+    nicio.in.valid  := vonly.in.valid
+    nicio.in.bits   := vonly.in.bits
+    assert(!vonly.in.valid || nicio.in.ready, "NIC input not ready for valid")
+    nicio.nic_mac_addr := vonly.nic_mac_addr
+    nicio.switch_mac_addr := vonly.switch_mac_addr
+    nicio.nic_ip_addr := vonly.nic_ip_addr
+    vonly
+  }
+}
+
+object NICIO {
+  def apply(vonly: NICIOvonly): NICIO = {
+    val nicio = Wire(new NICIO)
+    assert(!vonly.out.valid || nicio.out.ready)
+    nicio.out.valid := vonly.out.valid
+    nicio.out.bits  := vonly.out.bits
+    vonly.in.valid  := nicio.in.valid
+    vonly.in.bits   := nicio.in.bits
+    nicio.in.ready  := true.B
+    vonly.nic_mac_addr   := nicio.nic_mac_addr
+    vonly.switch_mac_addr := nicio.switch_mac_addr
+    vonly.nic_ip_addr := nicio.nic_ip_addr
+    nicio
+  }
+
+}
 
 /**
  * This is intended to be L-NIC's IO to the core.
@@ -219,6 +272,9 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
 
   pisa_egress.io.net_in <> arbiter.io.net_out
   pisa_egress.io.meta_in := arbiter.io.meta_out
+  pisa_egress.io.nic_mac_addr := io.net.nic_mac_addr
+  pisa_egress.io.switch_mac_addr := io.net.switch_mac_addr
+  pisa_egress.io.nic_ip_addr := io.net.nic_ip_addr
 
   // 512-bit => 64-bit
   StreamWidthAdapter(io.net.out,
