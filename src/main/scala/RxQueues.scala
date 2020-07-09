@@ -137,6 +137,45 @@ class GlobalRxQueues(implicit p: Parameters) extends Module {
 
   io.net_in.ready := false.B
 
+  // default - connect net_out for each core to a StreamWidthAdapter
+  val buf_net_out_wide = Wire(Vec(num_cores, Decoupled(new StreamChannel(NET_DP_BITS))))
+  val buf_net_out_narrow = Wire(Vec(num_cores, Decoupled(new StreamChannel(XLEN))))
+
+  for (i <- 0 until num_cores) {  
+    // 512-bit => 64-bit
+    StreamWidthAdapter(buf_net_out_narrow(i), // output
+                       buf_net_out_wide(i))   // input
+    // defaults
+    io.net_out(i) <> buf_net_out_narrow(i)
+    io.net_out(i).bits.data := reverse_bytes(buf_net_out_narrow(i).bits.data, XBYTES)
+  
+    buf_net_out_wide(i).valid := false.B
+    buf_net_out_wide(i).bits.keep := NET_DP_FULL_KEEP
+    buf_net_out_wide(i).bits.last := false.B
+
+    io.meta_out(i).valid := false.B
+  }
+
+  /* State machines to track where we are at in msgs transferred on the io.net_out busses */
+  val sWordOne :: sWaitLast :: Nil = Enum(2)
+  val netOutState = RegInit(VecInit(Seq.fill(num_cores)(sWordOne)))
+
+  for (i <- 0 until num_cores) {
+    val net_out = io.net_out(i)
+    switch(netOutState(i)) {
+      is (sWordOne) {
+        when (net_out.valid && net_out.ready && !net_out.bits.last) {
+          netOutState(i) := sWaitLast
+        }
+      }
+      is (sWaitLast) {
+        when (net_out.valid && net_out.ready && net_out.bits.last) {
+          netOutState(i) := sWordOne
+        }
+      }
+    }
+  }
+
   // register add_context cmds from cores so they can be serialized
   // NOTE: this approach is fine as long as the cores do not send a bunch
   //   of back-to-back add_context commands. In that case, some of the
@@ -279,25 +318,6 @@ class GlobalRxQueues(implicit p: Parameters) extends Module {
     val new_msg_context = Wire(UInt())
     new_msg_context := get_next_msg_cmd_deq(new_msg_core).bits
 
-    // 512-bit and 64-bit words from the msg buffer
-    val buf_net_out_wide = Wire(Vec(num_cores, Decoupled(new StreamChannel(NET_DP_BITS))))
-    val buf_net_out_narrow = Wire(Vec(num_cores, Decoupled(new StreamChannel(XLEN))))
-
-    for (i <- 0 until num_cores) {  
-      // 512-bit => 64-bit
-      StreamWidthAdapter(buf_net_out_narrow(i), // output
-                         buf_net_out_wide(i))   // input
-      // defaults
-      io.net_out(i) <> buf_net_out_narrow(i)
-      io.net_out(i).bits.data := reverse_bytes(buf_net_out_narrow(i).bits.data, XBYTES)
-  
-      buf_net_out_wide(i).valid := false.B
-      buf_net_out_wide(i).bits.keep := NET_DP_FULL_KEEP
-      buf_net_out_wide(i).bits.last := false.B
-
-      io.meta_out(i).valid := false.B
-    }
-
     val sIdle :: sDeqStart :: sDeqFinish :: Nil = Enum(3)
     val deqState = RegInit(sIdle)
 
@@ -340,14 +360,17 @@ class GlobalRxQueues(implicit p: Parameters) extends Module {
         val deq_fifo_word  = Wire(new RxFIFOWord(NET_DP_BITS, ptr_bits))
         deq_fifo_word := ram_rd_port
 
-        val net_out = io.net_out(reg_target_core)
-        val meta_out = io.meta_out(reg_target_core)
-        net_out.valid := true.B
-        net_out.bits.data := deq_fifo_word.app_hdr.asUInt
-        net_out.bits.keep := NET_CPU_FULL_KEEP
-        net_out.bits.last := false.B
-        when (net_out.ready) {
-          deqState := sDeqFinish
+        // write app_hdr drirectly to io.net_out rather, bypass StreamWidthAdapter
+        when (netOutState(reg_target_core) === sWordOne) {
+          val net_out = io.net_out(reg_target_core)
+          val meta_out = io.meta_out(reg_target_core)
+          net_out.valid := true.B
+          net_out.bits.data := deq_fifo_word.app_hdr.asUInt
+          net_out.bits.keep := NET_CPU_FULL_KEEP
+          net_out.bits.last := false.B
+          when (net_out.ready) {
+            deqState := sDeqFinish
+          }
         }
       }
       is (sDeqFinish) {
