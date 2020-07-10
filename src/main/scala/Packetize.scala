@@ -442,6 +442,9 @@ class LNICPacketize(implicit p: Parameters) extends Module {
                                   (1.U << deq_pkt_rem_bytes_reg) - 1.U,
                                   NET_DP_FULL_KEEP)
       io.net_out.bits.last := is_last_word
+
+      // default - keep reading the same word
+      deq_buf_ptr := deq_buf_ptr_reg
   
       // wait for no backpressure
       when (io.net_out.ready) {
