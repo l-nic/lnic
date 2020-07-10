@@ -101,12 +101,24 @@ class Egress(implicit p: Parameters) extends Module {
         headers.ip_version := 4.U
         headers.ip_ihl     := 5.U
         headers.ip_tos     := 0.U
+        val ip_len = Wire(UInt(16.W))
         when (is_ctrl_pkt) {
-          headers.ip_len   := IP_HDR_BYTES + LNIC_CTRL_PKT_BYTES
+          ip_len   := IP_HDR_BYTES + LNIC_CTRL_PKT_BYTES
         } .otherwise {
-          // NOTE: this len is not correct when the msg spans multiple pkts
-          headers.ip_len   := metaQueue_out.bits.msg_len + IP_HDR_BYTES + LNIC_HDR_BYTES
+          val msg_len = metaQueue_out.bits.msg_len
+          val num_pkts = MsgBufHelpers.compute_num_pkts(msg_len)
+          val is_last_pkt = (metaQueue_out.bits.pkt_offset === (num_pkts - 1.U))
+          require(isPow2(MAX_SEG_LEN_BYTES), "MAX_SEG_LEN_BYTES must be a power of 2!")
+          val last_bytes = Wire(UInt(log2Up(MAX_SEG_LEN_BYTES).W))
+          last_bytes := msg_len // truncate
+          when (is_last_pkt) {
+            // need to pad last_bytes to 16 bits wide
+            ip_len := Cat(0.U(16 - log2Up(MAX_SEG_LEN_BYTES)), last_bytes) + IP_HDR_BYTES + LNIC_HDR_BYTES
+          } .otherwise {
+            ip_len := MAX_SEG_LEN_BYTES.U + IP_HDR_BYTES + LNIC_HDR_BYTES
+          }
         }
+        headers.ip_len     := ip_len
         headers.ip_id      := 1.U
         headers.ip_flags   := 0.U
         headers.ip_offset  := 0.U
