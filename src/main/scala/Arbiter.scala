@@ -62,11 +62,13 @@ class LNICArbiter(implicit p: Parameters) extends Module {
   def selectCtrl() = {
     reg_selected := ctrl
     pktQueue_in <> io.ctrl_in
-    metaQueue_in.valid := true.B
+    metaQueue_in.valid := pktQueue_in.valid && pktQueue_in.ready
     metaQueue_in.bits := io.ctrl_meta_in.bits
-    when (pktQueue_in.valid && pktQueue_in.ready && pktQueue_in.bits.last) {
-      inState := sInSelect // stay in same state
-    } .otherwise {
+    when (pktQueue_in.valid && pktQueue_in.ready) {
+      assert(metaQueue_in.ready, "Arbiter: metaQueue is full during insertion of ctrl pkt!")
+      assert(io.ctrl_meta_in.valid, "Arbiter: io.ctrl_meta_in is not valid on first word of pkt!")
+    }
+    when (pktQueue_in.valid && pktQueue_in.ready && !pktQueue_in.bits.last) {
       inState := sInWaitEnd
     }
   }
@@ -74,11 +76,13 @@ class LNICArbiter(implicit p: Parameters) extends Module {
   def selectData() = {
     reg_selected := data
     pktQueue_in <> io.data_in
-    metaQueue_in.valid := true.B
+    metaQueue_in.valid := pktQueue_in.valid && pktQueue_in.ready
     metaQueue_in.bits := io.data_meta_in.bits
-    when (pktQueue_in.valid && pktQueue_in.ready && pktQueue_in.bits.last) {
-      inState := sInSelect // stay in same state
-    } .otherwise {
+    when (pktQueue_in.valid && pktQueue_in.ready) {
+      assert(metaQueue_in.ready, "Arbiter: metaQueue is full during insertion of data pkt!")
+      assert(io.data_meta_in.valid, "Arbiter: io.data_meta_in is not valid on first word of pkt!")
+    }
+    when (pktQueue_in.valid && pktQueue_in.ready && !pktQueue_in.bits.last) {
       inState := sInWaitEnd
     }
   }
