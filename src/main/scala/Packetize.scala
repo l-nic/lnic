@@ -123,6 +123,10 @@ class LNICPacketize(implicit p: Parameters) extends Module {
   })
   credit_scheduled_pkts_enq.valid := false.B
 
+  init_scheduled_pkts_deq.ready := false.B
+  credit_scheduled_pkts_deq.ready := false.B
+  timeout_scheduled_pkts_deq.ready := false.B
+
   /**
    * Msg Enqueue State Machine.
    * Tasks:

@@ -109,11 +109,15 @@ class Egress(implicit p: Parameters) extends Module {
           val num_pkts = MsgBufHelpers.compute_num_pkts(msg_len)
           val is_last_pkt = (metaQueue_out.bits.pkt_offset === (num_pkts - 1.U))
           require(isPow2(MAX_SEG_LEN_BYTES), "MAX_SEG_LEN_BYTES must be a power of 2!")
-          val last_bytes = Wire(UInt(log2Up(MAX_SEG_LEN_BYTES).W))
-          last_bytes := msg_len // truncate
+          val last_bytes = Wire(UInt(16.W))
+          // check if msg_len is divisible by MAX_SEG_LEN_BYTES
+          val msg_len_mod_mtu = msg_len(log2Up(MAX_SEG_LEN_BYTES)-1, 0)
+          last_bytes := Mux(msg_len_mod_mtu === 0.U,
+                            MAX_SEG_LEN_BYTES.U(16.W),
+                            msg_len_mod_mtu)
           when (is_last_pkt) {
             // need to pad last_bytes to 16 bits wide
-            ip_len := Cat(0.U(16 - log2Up(MAX_SEG_LEN_BYTES)), last_bytes) + IP_HDR_BYTES + LNIC_HDR_BYTES
+            ip_len := last_bytes + IP_HDR_BYTES + LNIC_HDR_BYTES
           } .otherwise {
             ip_len := MAX_SEG_LEN_BYTES.U + IP_HDR_BYTES + LNIC_HDR_BYTES
           }
