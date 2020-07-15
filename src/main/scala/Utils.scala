@@ -202,6 +202,7 @@ class TrueDualPortRAM(val data_width: Int, val num_entries: Int)
   })
 
   addResource("/vsrc/TrueDualPortRAM.v")
+  addResource("/vsrc/xilinx_tdpram.v")
 }
 
 object MemHelpers {

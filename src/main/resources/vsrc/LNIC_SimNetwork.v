@@ -61,9 +61,9 @@ module SimNetwork #(
     int dummy;
 
     longint _nic_mac_addr;
-    reg [47:0] _nic_mac_addr_reg;
+    reg [63:0] _nic_mac_addr_reg;
     longint _switch_mac_addr;
-    reg [47:0] _switch_mac_addr_reg;
+    reg [63:0] _switch_mac_addr_reg;
     int _nic_ip_addr;
     reg [31:0] _nic_ip_addr_reg;
 
@@ -76,11 +76,11 @@ module SimNetwork #(
 
     always@(posedge clock) begin
         if (reset) begin
-            net_out_ready <= 0;
-            net_in_valid <= 0;
-            net_in_bits_data <= 0;
-            net_in_bits_keep <= 0;
-            net_in_bits_last <= 0;
+            net_out_ready = 0;
+            net_in_valid = 0;
+            net_in_bits_data = 0;
+            net_in_bits_keep = 0;
+            net_in_bits_last = 0;
         end
         else begin
             network_tick(
@@ -107,8 +107,8 @@ module SimNetwork #(
         end
     end
 
-    assign net_nic_mac_addr = _nic_mac_addr_reg;
-    assign net_switch_mac_addr = _switch_mac_addr_reg;
+    assign net_nic_mac_addr = _nic_mac_addr_reg[47:0];
+    assign net_switch_mac_addr = _switch_mac_addr_reg[47:0];
     assign net_nic_ip_addr = _nic_ip_addr_reg;
 
 endmodule
