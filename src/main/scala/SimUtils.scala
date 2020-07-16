@@ -63,8 +63,8 @@ class Timestamp(to_nic: Boolean = true) extends Module {
   val net_word = Reg(Valid(new StreamChannel(NET_IF_BITS)))
 
   net_word.valid := io.net.in.valid
-  io.net.out.valid := net_word.valid
-  net_word.bits := io.net.in.bits // default
+  io.net.out.valid := net_word.valid // default
+  net_word.bits := io.net.in.bits
   io.net.out.bits := net_word.bits
 
   // state machine to parse headers
@@ -87,27 +87,27 @@ class Timestamp(to_nic: Boolean = true) extends Module {
       transition(sWordTwo)
     }
     is (sWordTwo) {
-      reg_eth_type := reverse_bytes(io.net.in.bits.data(47, 32), 2)
+      reg_eth_type := reverse_bytes(net_word.bits.data(47, 32), 2)
       transition(sWordThree)
     }
     is (sWordThree) {
-      reg_ip_proto := io.net.in.bits.data(63, 56)
+      reg_ip_proto := net_word.bits.data(63, 56)
       transition(sWordFour)
     }
     is (sWordFour) {
       transition(sWordFive)
     }
     is (sWordFive) {
-      reg_lnic_flags := io.net.in.bits.data(23, 16)
-      reg_lnic_src := reverse_bytes(io.net.in.bits.data(39, 24), 2)
-      reg_lnic_dst := reverse_bytes(io.net.in.bits.data(55, 40), 2)
+      reg_lnic_flags := net_word.bits.data(23, 16)
+      reg_lnic_src := reverse_bytes(net_word.bits.data(39, 24), 2)
+      reg_lnic_dst := reverse_bytes(net_word.bits.data(55, 40), 2)
       transition(sWordSix)
     }
     is (sWordSix) {
       transition(sWaitEnd)
     }
     is (sWaitEnd) {
-      when (io.net.in.valid && io.net.in.bits.last) {
+      when (net_word.valid && net_word.bits.last) {
         state := sWordOne
         // overwrite last bytes with timestamp / latency
         val is_lnic_data = Wire(Bool())
@@ -119,17 +119,17 @@ class Timestamp(to_nic: Boolean = true) extends Module {
           insert_latency := !to_nic.B && (reg_lnic_dst === LNICConsts.TEST_CONTEXT_ID)
           val new_data = Wire(UInt())
           when (insert_timestamp) {
-            new_data := Cat(reverse_bytes(reg_ts_start, 4), io.net.in.bits.data(31, 0))
-            net_word.bits.data := new_data
-            net_word.bits.keep := io.net.in.bits.keep
-            net_word.bits.last := io.net.in.bits.last
+            new_data := Cat(reverse_bytes(reg_ts_start, 4), net_word.bits.data(31, 0))
+            io.net.out.bits.data := new_data
+            io.net.out.bits.keep := net_word.bits.keep
+            io.net.out.bits.last := net_word.bits.last
           } .elsewhen (insert_latency) {
-            val pkt_ts = reverse_bytes(io.net.in.bits.data(63, 32), 4)
+            val pkt_ts = reverse_bytes(net_word.bits.data(63, 32), 4)
             new_data := Cat(reverse_bytes(reg_now - pkt_ts, 4), reverse_bytes(reg_now, 4))
             // last 4B is latency, first 4B is timestamp
-            net_word.bits.data := new_data
-            net_word.bits.keep := io.net.in.bits.keep
-            net_word.bits.last := io.net.in.bits.last
+            io.net.out.bits.data := new_data
+            io.net.out.bits.keep := net_word.bits.keep
+            io.net.out.bits.last := net_word.bits.last
           }
         }
       }
@@ -137,8 +137,8 @@ class Timestamp(to_nic: Boolean = true) extends Module {
   }
 
   def transition(next_state: UInt) = {
-    when (io.net.in.valid) {
-      when (!io.net.in.bits.last) {
+    when (net_word.valid) {
+      when (!net_word.bits.last) {
         state := next_state
       } .otherwise {
         state := sWordOne
