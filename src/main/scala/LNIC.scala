@@ -25,10 +25,6 @@ object LNICConsts {
   def NET_DP_FULL_KEEP = ~0.U(NET_DP_BYTES.W)
   def NET_CPU_FULL_KEEP = ~0.U(XBYTES.W)
 
-  //val NIC_MAC_ADDR = "h081122334408".U
-  //val SWITCH_MAC_ADDR = "h085566778808".U
-  //val NIC_IP_ADDR = "h0A000001".U // 10.0.0.1
-
   val IPV4_TYPE = "h0800".U(16.W)
   val LNIC_PROTO = "h99".U(8.W)
   val DATA_MASK = "b00000001".U(8.W)
@@ -41,24 +37,22 @@ object LNICConsts {
   val LNIC_HDR_BYTES = 30.U
   val LNIC_CTRL_PKT_BYTES = 94.U
 
+  val ETH_MAC_BITS = 48
   val MSG_ID_BITS = 16
   val BUF_PTR_BITS = 16
   val SIZE_CLASS_BITS = 8
   val PKT_OFFSET_BITS = 8
-  // TODO(sibanez): what is the expected range of the credit state?
   val CREDIT_BITS = 16
   val TIMER_BITS = 64
 
-  // Default L-NIC parameter values
-  val TIMEOUT_CYCLES = 30000 // ~100us @ 300MHz
-  val RTT_PKTS = 5
-
   // TODO(sibanez): maybe these should be parameters as well?
-  val MAX_SEGS_PER_MSG = 16
-  val MAX_SEG_LEN_BYTES = 512
+  val MAX_SEG_LEN_BYTES = 1024
+  require(MAX_MSG_SIZE_BYTES % MAX_SEG_LEN_BYTES == 0, "MAX_MSG_SIZE_BYTES must be evenly divisible by MAX_SEG_LEN_BYTES!")
+  val MAX_SEGS_PER_MSG = MAX_MSG_SIZE_BYTES/MAX_SEG_LEN_BYTES
   // Compute how long to wait b/w sending PULL pkts
-  val LINK_RATE_GBPS = 100
-  val MTU_CYCLES = ((MAX_SEG_LEN_BYTES*8)/LINK_RATE_GBPS).toInt
+  val LINK_RATE_GBPS = 200
+  val CYCLE_RATE_GHZ = 3
+  val MTU_CYCLES = (CYCLE_RATE_GHZ*(MAX_SEG_LEN_BYTES*8)/LINK_RATE_GBPS).toInt
 
   // Message buffers for both packetization and reassembly
   // LinkedHashMap[Int, Int] : {buffer_size (bytes) => num_buffers}
@@ -73,6 +67,10 @@ object LNICConsts {
   // they are being transmitted.
   val SCHEDULED_PKTS_Q_DEPTH = 256
   val PACED_PKTS_Q_DEPTH = 256
+
+  // Default L-NIC parameter values
+  val TIMEOUT_CYCLES = 30000 // ~10us @ 3GHz
+  val RTT_PKTS = 5
 
   // this is used to decide how many bits of the src IP to look at when allocating rx msg IDs
   val MAX_NUM_HOSTS = 128
@@ -100,9 +98,6 @@ object LNICConsts {
 
   // NOTE: these are only used for the Simulation Timestamp/Latency measurement module
   val TEST_CONTEXT_ID = 0x1234.U(LNIC_CONTEXT_BITS.W)
-
-  val ETH_MAC_BITS = 48
-  val NET_IF_WIDTH = 64
 }
 
 case class LNICParams(
@@ -112,7 +107,7 @@ case class LNICParams(
 
 case object LNICKey extends Field[Option[LNICParams]](None)
 
-class NICIO extends StreamIO(LNICConsts.NET_IF_WIDTH) {
+class NICIO extends StreamIO(LNICConsts.NET_IF_BITS) {
   val nic_mac_addr = Input(UInt(LNICConsts.ETH_MAC_BITS.W))
   val switch_mac_addr = Input(UInt(LNICConsts.ETH_MAC_BITS.W))
   val nic_ip_addr = Input(UInt(32.W))
@@ -121,8 +116,8 @@ class NICIO extends StreamIO(LNICConsts.NET_IF_WIDTH) {
 }
 
 class NICIOvonly extends Bundle {
-  val in = Flipped(Valid(new StreamChannel(LNICConsts.NET_IF_WIDTH)))
-  val out = Valid(new StreamChannel(LNICConsts.NET_IF_WIDTH))
+  val in = Flipped(Valid(new StreamChannel(LNICConsts.NET_IF_BITS)))
+  val out = Valid(new StreamChannel(LNICConsts.NET_IF_BITS))
   val nic_mac_addr = Input(UInt(LNICConsts.ETH_MAC_BITS.W))
   val switch_mac_addr = Input(UInt(LNICConsts.ETH_MAC_BITS.W))
   val nic_ip_addr = Input(UInt(32.W))
