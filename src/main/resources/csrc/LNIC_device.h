@@ -12,7 +12,7 @@
 
 class NetworkDevice {
   public:
-    NetworkDevice(const char *ifname, long long nic_mac_addr, long long switch_mac_addr, int nic_ip_addr);
+    NetworkDevice(const char *ifname, long long nic_mac_addr, long long switch_mac_addr, int nic_ip_addr, long long timeout_cycles, short rtt_pkts);
     ~NetworkDevice();
 
     void tick_tx(bool tx_valid,
@@ -31,6 +31,8 @@ class NetworkDevice {
     long long nic_mac_addr() { return _nic_mac_addr; }
     long long switch_mac_addr() { return _switch_mac_addr; }
     int nic_ip_addr() { return _nic_ip_addr; }
+    long long timeout_cycles() { return _timeout_cycles; }
+    short rtt_pkts() { return _rtt_pkts; }
 
   protected:
     int fd;
@@ -43,6 +45,8 @@ class NetworkDevice {
     long long _nic_mac_addr;
     long long _switch_mac_addr;
     int _nic_ip_addr;
+    long long _timeout_cycles;
+    short _rtt_pkts;
 
 };
 

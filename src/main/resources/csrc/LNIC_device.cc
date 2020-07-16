@@ -40,7 +40,7 @@ static int tuntap_alloc(const char *dev, int flags)
   return fd;
 }
 
-NetworkDevice::NetworkDevice(const char *ifname, long long nic_mac_addr, long long switch_mac_addr, int nic_ip_addr) 
+NetworkDevice::NetworkDevice(const char *ifname, long long nic_mac_addr, long long switch_mac_addr, int nic_ip_addr, long long timeout_cycles, short rtt_pkts) 
 {
     nic_mac_addr &= 0xFFFFFFFFFFFF;
     switch_mac_addr &= 0xFFFFFFFFFFFF;
@@ -48,6 +48,8 @@ NetworkDevice::NetworkDevice(const char *ifname, long long nic_mac_addr, long lo
     _nic_mac_addr = nic_mac_addr;
     _switch_mac_addr = switch_mac_addr;
     _nic_ip_addr = nic_ip_addr;
+    _timeout_cycles = timeout_cycles;
+    _rtt_pkts = rtt_pkts;
 
     fd = tuntap_alloc(ifname, IFF_TAP | IFF_NO_PI);
     if (fd < 0) {

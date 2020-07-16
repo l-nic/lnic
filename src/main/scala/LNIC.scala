@@ -69,8 +69,9 @@ object LNICConsts {
   val PACED_PKTS_Q_DEPTH = 256
 
   // Default L-NIC parameter values
-  val TIMEOUT_CYCLES = 30000 // ~10us @ 3GHz
-  val RTT_PKTS = 5
+  // Will now be provided via the LNICBridge
+  // val TIMEOUT_CYCLES = 30000 // ~10us @ 3GHz
+  // val RTT_PKTS = 5
 
   // this is used to decide how many bits of the src IP to look at when allocating rx msg IDs
   val MAX_NUM_HOSTS = 128
@@ -101,8 +102,8 @@ object LNICConsts {
 }
 
 case class LNICParams(
-  timeoutCycles:  Int = LNICConsts.TIMEOUT_CYCLES,
-  rttPkts:        Int = LNICConsts.RTT_PKTS
+  timeoutCycles:  Int = NICIO.timeout_cycles,
+  rttPkts:        Int = NICIO.rtt_pkts
 )
 
 case object LNICKey extends Field[Option[LNICParams]](None)
@@ -111,6 +112,8 @@ class NICIO extends StreamIO(LNICConsts.NET_IF_BITS) {
   val nic_mac_addr = Input(UInt(LNICConsts.ETH_MAC_BITS.W))
   val switch_mac_addr = Input(UInt(LNICConsts.ETH_MAC_BITS.W))
   val nic_ip_addr = Input(UInt(32.W))
+  val timeout_cycles = Input(Uint(LNICConsts.TIMER_BITS.W))
+  val rtt_pkts = Input(UInt(LNICConsts.CREDIT_BITS.W))
 
   override def cloneType = (new NICIO).asInstanceOf[this.type]
 }
@@ -121,6 +124,8 @@ class NICIOvonly extends Bundle {
   val nic_mac_addr = Input(UInt(LNICConsts.ETH_MAC_BITS.W))
   val switch_mac_addr = Input(UInt(LNICConsts.ETH_MAC_BITS.W))
   val nic_ip_addr = Input(UInt(32.W))
+  val timeout_cycles = Input(Uint(LNICConsts.TIMER_BITS.W))
+  val rtt_pkts = Input(UInt(LNICConsts.CREDIT_BITS.W))
 
   override def cloneType = (new NICIOvonly).asInstanceOf[this.type]
 }
@@ -137,6 +142,8 @@ object NICIOvonly {
     nicio.nic_mac_addr := vonly.nic_mac_addr
     nicio.switch_mac_addr := vonly.switch_mac_addr
     nicio.nic_ip_addr := vonly.nic_ip_addr
+    nicio.timeout_cycles := vonly.timeout_cycles
+    nicio.rtt_pkts := vonly.rtt_pkts
     vonly
   }
 }
@@ -153,6 +160,8 @@ object NICIO {
     vonly.nic_mac_addr   := nicio.nic_mac_addr
     vonly.switch_mac_addr := nicio.switch_mac_addr
     vonly.nic_ip_addr := nicio.nic_ip_addr
+    vonly.timeout_cycles := nicio.timeout_cycles
+    vonly.rtt_pkts := nicio.rtt_pkts
     nicio
   }
 
