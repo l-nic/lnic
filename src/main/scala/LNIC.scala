@@ -102,8 +102,8 @@ object LNICConsts {
 }
 
 case class LNICParams(
-  timeoutCycles:  Int = NICIO.timeout_cycles,
-  rttPkts:        Int = NICIO.rtt_pkts
+  max_rx_max_msgs_per_context:  Int = LNICConsts.MAX_RX_MAX_MSGS_PER_CONTEXT,
+  max_num_hosts: Int = LNICConsts.MAX_NUM_HOSTS
 )
 
 case object LNICKey extends Field[Option[LNICParams]](None)
@@ -112,7 +112,7 @@ class NICIO extends StreamIO(LNICConsts.NET_IF_BITS) {
   val nic_mac_addr = Input(UInt(LNICConsts.ETH_MAC_BITS.W))
   val switch_mac_addr = Input(UInt(LNICConsts.ETH_MAC_BITS.W))
   val nic_ip_addr = Input(UInt(32.W))
-  val timeout_cycles = Input(Uint(LNICConsts.TIMER_BITS.W))
+  val timeout_cycles = Input(UInt(LNICConsts.TIMER_BITS.W))
   val rtt_pkts = Input(UInt(LNICConsts.CREDIT_BITS.W))
 
   override def cloneType = (new NICIO).asInstanceOf[this.type]
@@ -124,7 +124,7 @@ class NICIOvonly extends Bundle {
   val nic_mac_addr = Input(UInt(LNICConsts.ETH_MAC_BITS.W))
   val switch_mac_addr = Input(UInt(LNICConsts.ETH_MAC_BITS.W))
   val nic_ip_addr = Input(UInt(32.W))
-  val timeout_cycles = Input(Uint(LNICConsts.TIMER_BITS.W))
+  val timeout_cycles = Input(UInt(LNICConsts.TIMER_BITS.W))
   val rtt_pkts = Input(UInt(LNICConsts.CREDIT_BITS.W))
 
   override def cloneType = (new NICIOvonly).asInstanceOf[this.type]
@@ -225,6 +225,8 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
 
   when (lnic_reset_done && !lnic_reset_done_reg) {
     printf("L-NIC reset done!\n")
+    printf("RTT packets is %d\n", io.net.rtt_pkts)
+    printf("Timeout cycles is %d\n", io.net.timeout_cycles)
   }
 
   ////////////////////////////////
@@ -235,10 +237,13 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
   packetize.io.delivered := pisa_ingress.io.delivered
   packetize.io.creditToBtx := pisa_ingress.io.creditToBtx
   pkt_gen.io.ctrlPkt := pisa_ingress.io.ctrlPkt
+  pisa_ingress.io.rtt_pkts := io.net.rtt_pkts
   msg_timers.io.schedule := packetize.io.schedule
   msg_timers.io.reschedule := packetize.io.reschedule
   msg_timers.io.cancel := packetize.io.cancel
   packetize.io.timeout := msg_timers.io.timeout
+  packetize.io.timeout_cycles := io.net.timeout_cycles
+  packetize.io.rtt_pkts := io.net.rtt_pkts
 
   //////////////////////////
   /* Datapath Connections */
