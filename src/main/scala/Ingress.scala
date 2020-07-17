@@ -33,6 +33,7 @@ class LNICPISAIngressIO extends Bundle {
   val creditToBtx = Valid(new CreditToBtxEvent)
   val ctrlPkt = Valid(new PISAEgressMetaIn)
   val creditReg = new IfElseRawIO
+  val rtt_pkts = Input(UInt(CREDIT_BITS.W))
 
   override def cloneType = new LNICPISAIngressIO().asInstanceOf[this.type]
 }
@@ -295,7 +296,7 @@ class Ingress(implicit p: Parameters) extends Module {
         io.creditReg.req.bits.index     := io.get_rx_msg_info.resp.bits.rx_msg_id
         io.creditReg.req.bits.data_1    := pull_offset_diff
         io.creditReg.req.bits.opCode_1  := REG_ADD
-        io.creditReg.req.bits.data_0    := RTT_PKTS.U + pull_offset_diff
+        io.creditReg.req.bits.data_0    := io.rtt_pkts + pull_offset_diff
         io.creditReg.req.bits.opCode_0  := REG_WRITE
         io.creditReg.req.bits.predicate := io.get_rx_msg_info.resp.bits.is_new_msg
         credit_stage1.bits.pipe_meta.expect_resp := true.B

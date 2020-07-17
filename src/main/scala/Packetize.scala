@@ -34,7 +34,8 @@ class PacketizeIO(implicit p: Parameters) extends Bundle {
   val reschedule = Valid(new ScheduleEvent)
   val cancel = Valid(new CancelEvent)
   val timeout = Flipped(Valid(new TimeoutEvent))
-}
+  val timeout_cycles = Input(UInt(TIMER_BITS.W))
+  val rtt_pkts = Input(UInt(CREDIT_BITS.W))}
 
 class TxMsgDescriptor extends Bundle {
   val tx_msg_id   = UInt(MSG_ID_BITS.W)
@@ -61,7 +62,6 @@ class ContextEnqState extends Bundle {
 
 @chiselName
 class LNICPacketize(implicit p: Parameters) extends Module {
-  val lnic_params = p(LNICKey).get
   val num_contexts = p(LNICRocketKey).get.maxNumContexts
   val num_cores = p(RocketTilesKey).size
 
@@ -255,7 +255,7 @@ class LNICPacketize(implicit p: Parameters) extends Module {
         // initialize state that is indexed by tx_msg_id (for transport support)
         delivered_table(tx_msg_id) := 0.U 
         credit_table.io.portA.we := true.B
-        credit_table.io.portA.din := lnic_params.rttPkts.U
+        credit_table.io.portA.din := io.rtt_pkts
         toBtx_table.io.portA.we := true.B
         toBtx_table.io.portA.din := 0.U // no pkts have been written yet
         // NOTE: we could also initialize max_tx_pkt_offset_table here but that would require
@@ -263,7 +263,7 @@ class LNICPacketize(implicit p: Parameters) extends Module {
         // schedule timer
         io.schedule.valid := true.B
         io.schedule.bits.msg_id := tx_msg_id
-        io.schedule.bits.delay := lnic_params.timeoutCycles.U
+        io.schedule.bits.delay := io.timeout_cycles
         io.schedule.bits.metadata.rtx_offset := 0.U
         io.schedule.bits.metadata.msg_desc := msg_desc
         // state transition
@@ -731,7 +731,7 @@ class LNICPacketize(implicit p: Parameters) extends Module {
       // fire reschedule event
       io.reschedule.valid := !reset.toBool
       io.reschedule.bits.msg_id := timeout_reg_1.bits.msg_id
-      io.reschedule.bits.delay := lnic_params.timeoutCycles.U
+      io.reschedule.bits.delay := io.timeout_cycles
       io.reschedule.bits.metadata.rtx_offset := max_tx_pkt_offset
       io.reschedule.bits.metadata.msg_desc := timeout_reg_1.bits.metadata.msg_desc
 

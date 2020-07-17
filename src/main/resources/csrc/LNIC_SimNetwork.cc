@@ -13,9 +13,11 @@ extern "C" void network_init(
         const char   *devname,
         long long    nic_mac_addr,
         long long    switch_mac_addr,
-        int          nic_ip_addr)
+        int          nic_ip_addr,
+        long long    timeout_cycles,
+        short        rtt_pkts)
 {
-    netdev_map[std::string(devname)] = new NetworkDevice(devname, nic_mac_addr, switch_mac_addr, nic_ip_addr);
+    netdev_map[std::string(devname)] = new NetworkDevice(devname, nic_mac_addr, switch_mac_addr, nic_ip_addr, timeout_cycles, rtt_pkts);
 }
 
 extern "C" void network_tick(
@@ -35,7 +37,9 @@ extern "C" void network_tick(
         
         long long     *nic_mac_addr,
         long long     *switch_mac_addr,
-        int           *nic_ip_addr)
+        int           *nic_ip_addr,
+        long long     *timeout_cycles,
+        short         *rtt_pkts)
 {
     NetworkDevice *netdev = netdev_map[std::string(devname)];
 
@@ -59,6 +63,8 @@ extern "C" void network_tick(
     *nic_mac_addr = netdev->nic_mac_addr();
     *switch_mac_addr = netdev->switch_mac_addr();
     *nic_ip_addr = netdev->nic_ip_addr();
+    *timeout_cycles = netdev->timeout_cycles();
+    *rtt_pkts = netdev->rtt_pkts();
 
     netdev->tick_rx(rx_ready);
 
