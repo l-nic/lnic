@@ -56,10 +56,8 @@ object LNICConsts {
 
   // Message buffers for both packetization and reassembly
   // LinkedHashMap[Int, Int] : {buffer_size (bytes) => num_buffers}
-  val MSG_BUFFER_COUNT = LinkedHashMap(64  -> 64,
-                                       128 -> 32,
-                                       1024 -> 16,
-                                       MAX_MSG_SIZE_BYTES -> 8)
+  val MSG_BUFFER_COUNT = LinkedHashMap(1024 -> 64,
+                                       MAX_MSG_SIZE_BYTES -> 64)
   val NUM_MSG_BUFFER_WORDS = MSG_BUFFER_COUNT.map({ case (size: Int, count: Int) => (size/NET_DP_BYTES)*count }).reduce(_ + _)
   val NUM_MSG_BUFFERS = MSG_BUFFER_COUNT.map({ case (size: Int, count: Int) => count }).reduce(_ + _)
   // TODO(sibanez): how best to size these queues?
