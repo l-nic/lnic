@@ -300,7 +300,7 @@ class LNICPacketize(implicit p: Parameters) extends Module {
         enq_toBtx := toBtx_table.io.portA.dout
         // NOTES:
         //   - We want to read the current value of toBtx here because if a pkt was dropped, we want to
-        //     make sure that bit stays set.
+        //     make sure that bit stays set. TODO(sibanez): Can we do a masked write instead?
         //   - We want to read the current value of credit here because if the credit increases quickly
         //     (i.e. PULL arrives quickly or pkts are written slowly) then more pkts can be sent immediately.
 
