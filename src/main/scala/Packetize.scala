@@ -592,8 +592,8 @@ class LNICPacketize(implicit p: Parameters) extends Module {
   val creditToBtx_reg_0 = RegNext(io.creditToBtx)
   val creditToBtx_reg_1 = RegNext(creditToBtx_reg_0)
   // read/write port to update creditToBtx state
-  val credit_ptr = Wire(UInt(CREDIT_BITS.W))
-  val toBtx_ptr = Wire(UInt(MAX_SEGS_PER_MSG.W))
+  val credit_ptr = Wire(UInt(MSG_ID_BITS.W))
+  val toBtx_ptr = Wire(UInt(MSG_ID_BITS.W))
   credit_ptr := creditToBtx_reg_0.bits.tx_msg_id
   toBtx_ptr := creditToBtx_reg_0.bits.tx_msg_id
   credit_table.io.portB.addr := credit_ptr
