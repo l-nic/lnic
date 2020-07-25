@@ -305,8 +305,9 @@ class LNICPacketize(implicit p: Parameters) extends Module {
         //     (i.e. PULL arrives quickly or pkts are written slowly) then more pkts can be sent immediately.
 
         when (is_last_word || is_full_pkt) {
-          // only immediately transmit up to credit pkts, not all pkts
-          when (ctx_state.pkt_offset < enq_credit) {
+          // Only immediately transmit up to credit pkts, not all pkts
+          // Always want to immediately transmit at least the first RTT_PKTS
+          when ((ctx_state.pkt_offset < enq_credit) || (ctx_state.pkt_offset < io.rtt_pkts)) {
             // schedule pkt for tx
             // TODO(sibanez): this isn't really a bug, this can legit happen, how best to deal with it?
             assert (init_scheduled_pkts_enq.ready, "scheduled_pkts queue is full during enqueue!")
@@ -562,6 +563,11 @@ class LNICPacketize(implicit p: Parameters) extends Module {
       val all_pkts = Wire(UInt(MAX_SEGS_PER_MSG.W))
       all_pkts := (1.U << num_pkts) - 1.U
       when (new_delivered_bitmap === all_pkts) {
+        // TODO(sibanez): if multiple ACKs arrive as a result of multiple DATA pkt retransmissions
+        //   then these values will be freed multiple times. This means we should set the retransmission
+        //   timeout sufficiently high to ensure that pkts are only retransmitted when there was
+        //   definitely a dropped pkt. Should really add a tx_msg_id_table that keeps track of 
+        //   whether or not a particular tx_msg_id is allocated ... is it worth doing this now?
         // free tx_msg_id
         assert(tx_msg_id_freelist.io.enq.ready, "tx_msg_id_freelist is full when trying to free a tx_msg_id!")
         tx_msg_id_freelist.io.enq.valid := true.B
