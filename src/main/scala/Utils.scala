@@ -50,6 +50,8 @@ class StreamNarrower[T <: Data](inW: Int, outW: Int, metaType: T) extends Module
   val outBytes = outW / 8
   val outBeats = inW / outW
 
+  require(outBeats > 1, "StreamNarrower requires input to be wider than output!")
+
   val bits = Reg(new StreamChannel(inW))
   val meta_valid = Reg(Bool())
   val meta = Reg(metaType.cloneType)
@@ -58,27 +60,24 @@ class StreamNarrower[T <: Data](inW: Int, outW: Int, metaType: T) extends Module
   val s_recv :: s_send_first :: s_send_finish :: Nil = Enum(3)
   val state = RegInit(s_recv)
 
-  val nextData = bits.data >> outW.U
-  val nextKeep = bits.keep >> outBytes.U
+  val nextData = Wire(UInt())
+  val nextKeep = Wire(UInt())
+  val nextCount = Wire(UInt())
+  nextCount := count - 1.U
+  nextData := bits.data >> outW.U
+  nextKeep := bits.keep >> outBytes.U
 
   io.in.ready := state === s_recv
-  io.out.valid := (state === s_send_first) || (state === s_send_finish)
+  io.out.valid := (state === s_send_first) || (state === s_send_finish) || ((state === s_recv) && io.in.valid)
+  // defaults - can be overridden in s_recv state
   io.out.bits.data := bits.data(outW - 1, 0)
   io.out.bits.keep := bits.keep(outBytes - 1, 0)
   io.out.bits.last := bits.last && !nextKeep.orR
   io.meta_out.bits := meta
-  io.meta_out.valid := meta_valid && (state === s_send_first)
-
-  when (io.in.fire()) {
-    count := (outBeats - 1).U
-    bits := io.in.bits
-    meta_valid := io.meta_in.valid
-    meta := io.meta_in.bits
-    state := s_send_first
-  }
+  io.meta_out.valid := ((state === s_send_first) && meta_valid) || ((state === s_recv) && io.meta_in.valid)
 
   when (io.out.fire()) {
-    count := count - 1.U
+    count := nextCount
     bits.data := nextData
     bits.keep := nextKeep
     state := s_send_finish
@@ -86,6 +85,35 @@ class StreamNarrower[T <: Data](inW: Int, outW: Int, metaType: T) extends Module
       state := s_recv
     }
   }
+
+  when (io.in.fire()) {
+    when (io.out.ready) {
+      // output is ready - send the first word immediately
+      io.out.bits.data := io.in.bits.data(outW - 1, 0)
+      io.out.bits.keep := io.in.bits.keep(outBytes - 1, 0)
+      io.out.bits.last := io.in.bits.last && !(io.in.bits.keep >> outBytes.U).orR
+      io.meta_out.bits := io.meta_in.bits
+      when (io.out.bits.last) {
+        // we already transferred the last word, go straight to receiving the next word
+        state := s_recv
+      } .otherwise {
+        // skip the s_send_first state and go straight to s_send_finish
+        count := (outBeats - 2).U
+        bits.data := io.in.bits.data >> outW.U
+        bits.keep := io.in.bits.keep >> outBytes.U
+        bits.last := io.in.bits.last
+        state := s_send_finish
+      }
+    } .otherwise {
+      // output is not ready -- go to s_send_first state
+      count := (outBeats - 1).U
+      bits := io.in.bits
+      meta_valid := io.meta_in.valid
+      meta := io.meta_in.bits
+      state := s_send_first
+    }
+  }
+
 }
 
 class StreamWidener[T <: Data](inW: Int, outW: Int, metaType: T) extends Module {
