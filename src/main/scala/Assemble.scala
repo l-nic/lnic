@@ -217,7 +217,9 @@ class LNICAssemble(implicit p: Parameters) extends Module {
       // Get result of reading the rx_msg_id_table
       cur_rx_msg_id_table_entry := (new RxMsgIdTableEntry(msg_id_bits)).fromBits(rx_msg_id_table.io.portA.dout)
       val pkt_mask = Wire(UInt(MAX_SEGS_PER_MSG.W))
-      pkt_mask := 1.U << get_rx_msg_info_req_reg_reg.bits.pkt_offset
+      pkt_mask := Mux(get_rx_msg_info_req_reg_reg.bits.is_chopped,
+                        0.U, // chopped pkts don't count as any pkts
+                        1.U << get_rx_msg_info_req_reg_reg.bits.pkt_offset)
       when (cur_rx_msg_id_table_entry.valid) {
         // This msg has already been allocated an rx_msg_id
         // Check if we've already received this pkt or if it's a new pkt
