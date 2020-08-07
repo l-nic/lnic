@@ -49,6 +49,7 @@ class GetRxMsgInfoReq extends Bundle {
   val src_context = UInt(LNIC_CONTEXT_BITS.W)
   val tx_msg_id = UInt(MSG_ID_BITS.W)
   val msg_len = UInt(MSG_LEN_BITS.W)
+  val pkt_offset = UInt(PKT_OFFSET_BITS.W)
 }
 
 class GetRxMsgInfoResp extends Bundle {
@@ -251,7 +252,7 @@ class Ingress(implicit p: Parameters) extends Module {
       io.get_rx_msg_info.req.bits.src_context := headers_reg.bits.lnic_src
       io.get_rx_msg_info.req.bits.tx_msg_id   := headers_reg.bits.lnic_tx_msg_id
       io.get_rx_msg_info.req.bits.msg_len     := headers_reg.bits.lnic_msg_len
-
+      io.get_rx_msg_info.req.bits.pkt_offset  := headers_reg.bits.lnic_pkt_offset
     } .otherwise {
       // this is an ACK/NACK/PULL pkt
       rx_info_stage1.bits.pipe_meta.is_data := false.B
@@ -282,8 +283,13 @@ class Ingress(implicit p: Parameters) extends Module {
         credit_stage1.bits.pipe_meta.drop := true.B
       } .otherwise {
         // this is a normal data pkt
-        credit_stage1.bits.pipe_meta.genACK := true.B
-        pull_offset_diff := 1.U
+        when (io.get_rx_msg_info.resp.bits.fail) {
+          // failed to allocate a buffer & rx_msg_id -- treat like a chopped pkt
+          credit_stage1.bits.pipe_meta.genNACK := true.B
+        } .otherwise {
+          credit_stage1.bits.pipe_meta.genACK := true.B
+          pull_offset_diff := 1.U
+        }
         // fill out metadata for pkt going to CPU
         credit_stage1.bits.ingress_meta.rx_msg_id := io.get_rx_msg_info.resp.bits.rx_msg_id
       }

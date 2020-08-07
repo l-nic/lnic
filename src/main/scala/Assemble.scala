@@ -2,7 +2,7 @@ package lnic
 
 import Chisel._
 
-import chisel3.{VecInit, SyncReadMem}
+import chisel3.{VecInit, SyncReadMem, dontTouch}
 import chisel3.experimental._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket._
@@ -51,6 +51,11 @@ class RxMsgKey(val src_ip_bits: Int, val msg_id_bits: Int) extends Bundle {
 class RxMsgIdTableEntry(val msg_id_bits: Int) extends Bundle {
   val valid = Bool()
   val rx_msg_id = UInt(msg_id_bits.W)
+  // Keep track of which pkts of the msg have already been received.
+  // Do not let a pkt into the reassembly module if it has already been received.
+  // This is because if the final pkt of the msg is received multiple
+  // times it would cause the msg to scheduled multiple times.
+  val received_pkts = UInt(MAX_SEGS_PER_MSG.W)
 
   override def cloneType = new RxMsgIdTableEntry(msg_id_bits).asInstanceOf[this.type]
 }
@@ -119,6 +124,14 @@ class LNICAssemble(implicit p: Parameters) extends Module {
   val scheduled_msgs_deq = Wire(Flipped(Decoupled(new RxMsgDescriptor)))
   scheduled_msgs_deq <> Queue(scheduled_msgs_enq, NUM_MSG_BUFFERS)
 
+  val scheduled_msgs_count = RegInit(0.U(64.W))
+  dontTouch(scheduled_msgs_count)
+  when (scheduled_msgs_enq.fire() && !scheduled_msgs_deq.fire()) {
+    scheduled_msgs_count := scheduled_msgs_count + 1.U
+  } .elsewhen (!scheduled_msgs_enq.fire() && scheduled_msgs_deq.fire()) {
+    scheduled_msgs_count := scheduled_msgs_count - 1.U
+  }
+
   // defaults
   rx_msg_id_freelist.io.enq.valid := false.B
   rx_msg_id_freelist.io.deq.ready := false.B
@@ -151,6 +164,7 @@ class LNICAssemble(implicit p: Parameters) extends Module {
   // register the extern function call request parameters
   // NOTE: this assumes requests will not arrive on back-to-back cycles - TODO: may want to check this assumption
   val get_rx_msg_info_req_reg = RegNext(io.get_rx_msg_info.req)
+  val get_rx_msg_info_req_reg_reg = RegNext(get_rx_msg_info_req_reg)
 
   // TODO(sibanez): update msg_key to include src_ip and src_context,
   //   which requires rx_msg_id_table to become a D-left lookup table.
@@ -181,6 +195,8 @@ class LNICAssemble(implicit p: Parameters) extends Module {
   // bitmap indicates classes with available buffers that are large enough
   val available_classes = free_classes.asUInt & candidate_classes.asUInt
 
+  val new_rx_msg_id_table_entry = Wire(new RxMsgIdTableEntry(msg_id_bits))
+
   switch (stateRxMsgInfo) {
     is (sLookupMsg) {
       // wait for a request to arrive
@@ -200,11 +216,31 @@ class LNICAssemble(implicit p: Parameters) extends Module {
       io.get_rx_msg_info.resp.valid := !(reset.toBool)
       // Get result of reading the rx_msg_id_table
       cur_rx_msg_id_table_entry := (new RxMsgIdTableEntry(msg_id_bits)).fromBits(rx_msg_id_table.io.portA.dout)
+      val pkt_mask = Wire(UInt(MAX_SEGS_PER_MSG.W))
+      pkt_mask := 1.U << get_rx_msg_info_req_reg_reg.bits.pkt_offset
       when (cur_rx_msg_id_table_entry.valid) {
         // This msg has already been allocated an rx_msg_id
-        io.get_rx_msg_info.resp.bits.fail := false.B
-        io.get_rx_msg_info.resp.bits.rx_msg_id := Cat(0.U((MSG_ID_BITS - msg_id_bits).W), cur_rx_msg_id_table_entry.rx_msg_id)
-        io.get_rx_msg_info.resp.bits.is_new_msg := false.B
+        // Check if we've already received this pkt or if it's a new pkt
+        val is_new_pkt = Wire(Bool())
+        is_new_pkt := (cur_rx_msg_id_table_entry.received_pkts & pkt_mask) === 0.U
+        when (is_new_pkt) {
+          // Only allow new pkts into the assmebly module
+          io.get_rx_msg_info.resp.bits.fail := false.B
+          io.get_rx_msg_info.resp.bits.rx_msg_id := Cat(0.U((MSG_ID_BITS - msg_id_bits).W), cur_rx_msg_id_table_entry.rx_msg_id)
+          io.get_rx_msg_info.resp.bits.is_new_msg := false.B
+          // Update rx_msg_id_table to remember that we've received the pkt
+          new_rx_msg_id_table_entry.valid := true.B
+          new_rx_msg_id_table_entry.rx_msg_id := cur_rx_msg_id_table_entry.rx_msg_id
+          new_rx_msg_id_table_entry.received_pkts := cur_rx_msg_id_table_entry.received_pkts | pkt_mask
+          rx_msg_id_table.io.portA.addr := msg_key_reg.asUInt
+          rx_msg_id_table.io.portA.we := true.B
+          rx_msg_id_table.io.portA.din := new_rx_msg_id_table_entry.asUInt
+        } .otherwise {
+          // We've already received this pkt -- don't let it in again
+          io.get_rx_msg_info.resp.bits.fail := true.B
+          io.get_rx_msg_info.resp.bits.rx_msg_id := 0.U
+          io.get_rx_msg_info.resp.bits.is_new_msg := true.B
+        }
       } .elsewhen (allocation_success_reg) {
         // This is a new msg and we can allocate a buffer and rx_msg_id
         io.get_rx_msg_info.resp.bits.fail := false.B
@@ -215,9 +251,9 @@ class LNICAssemble(implicit p: Parameters) extends Module {
         assert(rx_msg_id_freelist.io.deq.valid, "There is an available buffer but not an available rx_msg_id?")
         rx_msg_id_freelist.io.deq.ready := true.B
         // update rx_msg_id_table
-        val new_rx_msg_id_table_entry = Wire(new RxMsgIdTableEntry(msg_id_bits))
         new_rx_msg_id_table_entry.valid := true.B
         new_rx_msg_id_table_entry.rx_msg_id := rx_msg_id // truncate
+        new_rx_msg_id_table_entry.received_pkts := pkt_mask
         rx_msg_id_table.io.portA.addr := msg_key_reg.asUInt
         rx_msg_id_table.io.portA.we := true.B
         rx_msg_id_table.io.portA.din := new_rx_msg_id_table_entry.asUInt
