@@ -33,9 +33,9 @@ object LNICConsts {
   val PULL_MASK = "b00001000".U(8.W)
   val CHOP_MASK = "b00010000".U(8.W)
 
-  val IP_HDR_BYTES = 20.U
-  val LNIC_HDR_BYTES = 30.U
-  val LNIC_CTRL_PKT_BYTES = 94.U
+  val IP_HDR_BYTES = 20
+  val LNIC_HDR_BYTES = 30
+  val LNIC_CTRL_PKT_BYTES = 94
 
   val ETH_MAC_BITS = 48
   val MSG_ID_BITS = 16
@@ -52,6 +52,7 @@ object LNICConsts {
   // Compute how long to wait b/w sending PULL pkts
   val LINK_RATE_GBPS = 200
   val CYCLE_RATE_GHZ = 3
+  val MTU_BYTES = MAX_SEG_LEN_BYTES + LNIC_HDR_BYTES + IP_HDR_BYTES + 14
   val MTU_CYCLES = (CYCLE_RATE_GHZ*(MAX_SEG_LEN_BYTES*8)/LINK_RATE_GBPS).toInt
 
   // Message buffers for both packetization and reassembly
@@ -78,17 +79,17 @@ object LNICConsts {
   val MAX_RX_MAX_MSGS_PER_CONTEXT = 2
 
   // TODO(sibanez): how best to size these?
-  val ARBITER_PKT_BUF_FILTS = MAX_SEG_LEN_BYTES/NET_DP_BYTES * 2
-  val ARBITER_META_BUF_FILTS = MAX_SEG_LEN_BYTES/NET_DP_BYTES * 2
+  val ARBITER_PKT_BUF_FILTS = MTU_BYTES/NET_DP_BYTES * 2
+  val ARBITER_META_BUF_FILTS = MTU_BYTES/NET_DP_BYTES * 2
 
-  val PARSER_PKT_QUEUE_FLITS = MAX_SEG_LEN_BYTES/NET_DP_BYTES * 2
+  val PARSER_PKT_QUEUE_FLITS = MTU_BYTES/NET_DP_BYTES * 2
   // NOTE: should size MA_PKT_QUEUE_FLITS based on depth of M/A pipeline, but this should be enough
-  val MA_PKT_QUEUE_FLITS = MAX_SEG_LEN_BYTES/NET_DP_BYTES * 2
+  val MA_PKT_QUEUE_FLITS = MTU_BYTES/NET_DP_BYTES * 2
   // NOTE: MA_META_QUEUE is just used to synchronize metadata and payload and can be pretty small
-  val MA_META_QUEUE_FLITS = MAX_SEG_LEN_BYTES/NET_DP_BYTES * 2
-  val DEPARSER_META_QUEUE_FLITS = MAX_SEG_LEN_BYTES/NET_DP_BYTES * 2
+  val MA_META_QUEUE_FLITS = MTU_BYTES/NET_DP_BYTES * 2
+  val DEPARSER_META_QUEUE_FLITS = MTU_BYTES/NET_DP_BYTES * 2
   // NOTE: the DEPARSER_PKT_QUEUE can actually fill up and exert backpressure because it is adding headers to the pkts
-  val DEPARSER_PKT_QUEUE_FLITS = MAX_SEG_LEN_BYTES/NET_DP_BYTES * 2
+  val DEPARSER_PKT_QUEUE_FLITS = MTU_BYTES/NET_DP_BYTES * 2
 
   // Consts for register externs
   val REG_READ  = 0.U(8.W)
@@ -248,7 +249,7 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
   //////////////////////////
   // Queue to accomodate a little backpressure from StreamWidener
   val net_in_queue_deq = Wire(Decoupled(new StreamChannel(LNICConsts.NET_IF_BITS)))
-  net_in_queue_deq <> Queue(io.net.in, LNICConsts.MAX_SEG_LEN_BYTES/LNICConsts.NET_IF_BYTES * 2)
+  net_in_queue_deq <> Queue(io.net.in, LNICConsts.MTU_BYTES/LNICConsts.NET_IF_BYTES * 2)
 
   // 64-bit => 512-bit
   StreamWidthAdapter(pisa_ingress.io.net_in,

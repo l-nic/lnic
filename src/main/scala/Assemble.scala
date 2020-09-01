@@ -412,8 +412,13 @@ class LNICAssemble(implicit p: Parameters) extends Module {
   }
 
   def compute_pkt_ptr(buf_ptr: UInt, pkt_offset: UInt) = {
-    val pkt_ptr = buf_ptr + (pkt_offset<<log2Up(max_words_per_pkt).U)
-    pkt_ptr
+    if (max_words_per_pkt == 1) {
+      val pkt_ptr = buf_ptr + pkt_offset
+      pkt_ptr
+    } else {
+      val pkt_ptr = buf_ptr + (pkt_offset<<log2Up(max_words_per_pkt).U)
+      pkt_ptr
+    }
   }
 
   def schedule_msg(dst_context: UInt, rx_msg_id: UInt, tx_msg_id: UInt, buf_ptr: UInt, size_class: UInt, src_ip: UInt, src_context: UInt, msg_len: UInt) = {

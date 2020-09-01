@@ -103,7 +103,7 @@ class Egress(implicit p: Parameters) extends Module {
         headers.ip_tos     := 0.U
         val ip_len = Wire(UInt(16.W))
         when (is_ctrl_pkt) {
-          ip_len   := IP_HDR_BYTES + LNIC_CTRL_PKT_BYTES
+          ip_len   := IP_HDR_BYTES.U + LNIC_CTRL_PKT_BYTES.U
         } .otherwise {
           val msg_len = metaQueue_out.bits.msg_len
           val num_pkts = MsgBufHelpers.compute_num_pkts(msg_len)
@@ -117,9 +117,9 @@ class Egress(implicit p: Parameters) extends Module {
                             msg_len_mod_mtu)
           when (is_last_pkt) {
             // need to pad last_bytes to 16 bits wide
-            ip_len := last_bytes + IP_HDR_BYTES + LNIC_HDR_BYTES
+            ip_len := last_bytes + IP_HDR_BYTES.U + LNIC_HDR_BYTES.U
           } .otherwise {
-            ip_len := MAX_SEG_LEN_BYTES.U + IP_HDR_BYTES + LNIC_HDR_BYTES
+            ip_len := MAX_SEG_LEN_BYTES.U + IP_HDR_BYTES.U + LNIC_HDR_BYTES.U
           }
         }
         headers.ip_len     := ip_len
