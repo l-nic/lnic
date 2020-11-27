@@ -7,8 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define ETH_MAX_WORDS 190
-#define ETH_MAX_BYTES 1518
+#define ETH_MAX_WORDS 258
+#define ETH_MAX_BYTES 2064
 
 struct network_flit {
     uint64_t data;
