@@ -33,7 +33,7 @@ class LNICPktGen(implicit p: Parameters) extends Module {
   // defaults
   io.net_out.valid := scheduled_meta_deq.valid
   io.net_out.bits.data := 0.U
-  io.net_out.bits.keep := NET_DP_FULL_KEEP
+  io.net_out.bits.keep := 1.U // one dummy byte
   io.net_out.bits.last := true.B
   scheduled_meta_deq.ready := io.net_out.ready
 
