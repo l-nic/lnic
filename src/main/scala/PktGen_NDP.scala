@@ -55,9 +55,9 @@ class NDPPktGen(implicit p: Parameters) extends Module {
   val genACK = Wire(Bool())
   val genNACK = Wire(Bool())
   val genPULL = Wire(Bool())
-  genACK := (ctrlPkt_reg.bits.flags & ACK_MASK > 0.U)
-  genNACK := (ctrlPkt_reg.bits.flags & NACK_MASK > 0.U)
-  genPULL := (ctrlPkt_reg.bits.flags & PULL_MASK > 0.U)
+  genACK := (ctrlPkt_reg.bits.flags & ACK_MASK) > 0.U
+  genNACK := (ctrlPkt_reg.bits.flags & NACK_MASK) > 0.U
+  genPULL := (ctrlPkt_reg.bits.flags & PULL_MASK) > 0.U
 
   when (ctrlPkt_reg.valid && !reset.toBool) {
     assert(genACK || genNACK, "Violated assumption that ACK or NACK is always generated!")

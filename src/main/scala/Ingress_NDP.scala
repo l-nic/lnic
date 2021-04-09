@@ -195,7 +195,7 @@ class NDPIngress(implicit p: Parameters) extends Module {
       val is_chopped = Wire(Bool())
       is_chopped := (headers_reg.bits.ndp_flags & CHOP_MASK) > 0.U
       // do not pass CHOP pkts to the assembly module
-      rx_info_stage1.bits.pipe_meta.drop := !is_chopped
+      rx_info_stage1.bits.pipe_meta.drop := is_chopped
 
       // NOTE: Both DATA and CHOP'ed DATA pkts need to invoke get_rx_msg_info
       // because they both need to access the creditReg to compute the PULL offset.
