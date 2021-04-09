@@ -505,6 +505,10 @@ class GrantScheduler(implicit p: Parameters) extends Module {
    */
 
   val msg_state = RegInit(VecInit(Seq.fill(NUM_MSG_BUFFERS)((new GrantMsgState).fromBits(0.U))))
+  // initialize the rx_msg_id regs
+  for (i <- 0 until NUM_MSG_BUFFERS) {
+    msg_state(i).rx_msg_id := i.U
+  }
 
   // Cycle 1: When receiving a request, update rx_msg_id's rank, grantableIdx,
   //   and grantedIDx. Mark the msg's valid flag as !removeObj.
