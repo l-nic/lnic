@@ -10,81 +10,24 @@ import freechips.rocketchip.rocket.NetworkHelpers._
 import freechips.rocketchip.rocket.LNICRocketConsts._
 import LNICConsts._
 
-class PISAIngressMetaOut extends Bundle {
-  // metadata for pkts going to CPU
-  val src_ip       = UInt(32.W)
-  val src_context  = UInt(LNIC_CONTEXT_BITS.W)
-  val msg_len      = UInt(MSG_LEN_BITS.W)
-  val pkt_offset   = UInt(PKT_OFFSET_BITS.W)
-  val dst_context  = UInt(LNIC_CONTEXT_BITS.W)
-  val rx_msg_id    = UInt(MSG_ID_BITS.W)
-  val tx_msg_id    = UInt(MSG_ID_BITS.W)
-}
-
 /**
- * All IO for the LNIC PISA Ingress module.
+ * All IO for the NDP Ingress module.
  */
-class LNICPISAIngressIO extends Bundle {
+class NDPIngressIO extends Bundle {
   val net_in = Flipped(Decoupled(new StreamChannel(NET_DP_BITS)))
   val net_out = Decoupled(new StreamChannel(NET_DP_BITS))
-  val meta_out = Valid(new PISAIngressMetaOut)
+  val meta_out = Valid(new IngressMetaOut)
   val get_rx_msg_info = new GetRxMsgInfoIO
   val delivered = Valid(new DeliveredEvent)
   val creditToBtx = Valid(new CreditToBtxEvent)
-  val ctrlPkt = Valid(new PISAEgressMetaIn)
+  val ctrlPkt = Valid(new EgressMetaIn)
   val creditReg = new IfElseRawIO
   val rtt_pkts = Input(UInt(CREDIT_BITS.W))
 
-  override def cloneType = new LNICPISAIngressIO().asInstanceOf[this.type]
+  override def cloneType = new NDPIngressIO().asInstanceOf[this.type]
 }
 
-/* IO for Ingress extern call */
-class GetRxMsgInfoIO extends Bundle {
-  val req = Valid(new GetRxMsgInfoReq)
-  val resp = Flipped(Valid(new GetRxMsgInfoResp))
-}
-
-class GetRxMsgInfoReq extends Bundle {
-  val src_ip = UInt(32.W)
-  val src_context = UInt(LNIC_CONTEXT_BITS.W)
-  val tx_msg_id = UInt(MSG_ID_BITS.W)
-  val msg_len = UInt(MSG_LEN_BITS.W)
-  val pkt_offset = UInt(PKT_OFFSET_BITS.W)
-  val is_chopped = Bool()
-}
-
-class GetRxMsgInfoResp extends Bundle {
-  val fail = Bool()
-  val rx_msg_id = UInt(MSG_ID_BITS.W)
-  // TODO(sibanez): add additional fields for transport processing
-  val is_new_msg = Bool()
-}
-
-class DeliveredEvent extends Bundle {
-  val tx_msg_id = UInt(MSG_ID_BITS.W)
-  val pkt_offset = UInt(PKT_OFFSET_BITS.W)
-  val msg_len = UInt(MSG_LEN_BITS.W)
-  val buf_ptr = UInt(BUF_PTR_BITS.W)
-  val buf_size_class = UInt(SIZE_CLASS_BITS.W)
-}
-
-class CreditToBtxEvent extends Bundle {
-  val tx_msg_id = UInt(MSG_ID_BITS.W)
-  val rtx = Bool()
-  val rtx_pkt_offset = UInt(PKT_OFFSET_BITS.W)
-  val update_credit = Bool()
-  val new_credit = UInt(CREDIT_BITS.W)
-  // Additional fields for generating pkts
-  // NOTE: these could be stored in tables indexed by tx_msg_id, but this would require extra state ...
-  val buf_ptr = UInt(BUF_PTR_BITS.W)
-  val buf_size_class = UInt(SIZE_CLASS_BITS.W)
-  val dst_ip = UInt(32.W)
-  val dst_context = UInt(LNIC_CONTEXT_BITS.W)
-  val msg_len = UInt(MSG_LEN_BITS.W)
-  val src_context = UInt(LNIC_CONTEXT_BITS.W)
-}
-
-class Headers extends Bundle {
+class NDPHeaders extends Bundle {
   // Ethernet Header
   val eth_dst = UInt(48.W)
   val eth_src = UInt(48.W)
@@ -102,21 +45,21 @@ class Headers extends Bundle {
   val ip_chksum = UInt(16.W)
   val ip_src = UInt(32.W)
   val ip_dst = UInt(32.W)
-  // LNIC Header
-  val lnic_flags = UInt(8.W)
-  val lnic_src = UInt(LNIC_CONTEXT_BITS.W)
-  val lnic_dst = UInt(LNIC_CONTEXT_BITS.W)
-  val lnic_msg_len = UInt(MSG_LEN_BITS.W)
-  val lnic_pkt_offset = UInt(PKT_OFFSET_BITS.W)
-  val lnic_pull_offset = UInt(CREDIT_BITS.W)
-  val lnic_tx_msg_id = UInt(MSG_ID_BITS.W)
-  val lnic_buf_ptr = UInt(BUF_PTR_BITS.W)
-  val lnic_buf_size_class = UInt(SIZE_CLASS_BITS.W)
-  val lnic_padding = UInt(120.W) // padding to make header len = 64B for easy parsing / deparsing
+  // NDP Header
+  val ndp_flags = UInt(8.W)
+  val ndp_src = UInt(LNIC_CONTEXT_BITS.W)
+  val ndp_dst = UInt(LNIC_CONTEXT_BITS.W)
+  val ndp_msg_len = UInt(MSG_LEN_BITS.W)
+  val ndp_pkt_offset = UInt(PKT_OFFSET_BITS.W)
+  val ndp_pull_offset = UInt(CREDIT_BITS.W)
+  val ndp_tx_msg_id = UInt(MSG_ID_BITS.W)
+  val ndp_buf_ptr = UInt(BUF_PTR_BITS.W)
+  val ndp_buf_size_class = UInt(SIZE_CLASS_BITS.W)
+  val ndp_padding = UInt(120.W) // padding to make header len = 64B for easy parsing / deparsing
 }
 
 // Metadata that is only used within the M/A pipeline
-class PipeMeta extends Bundle {
+class NDPPipeMeta extends Bundle {
   val drop = Bool()
   val is_data = Bool()
   val flags = UInt(8.W)
@@ -129,19 +72,19 @@ class PipeMeta extends Bundle {
   val expect_resp = Bool()
 }
 
-class PipelineRegs extends Bundle {
-  val ingress_meta = new PISAIngressMetaOut
-  val pipe_meta = new PipeMeta
+class NDPPipelineRegs extends Bundle {
+  val ingress_meta = new IngressMetaOut
+  val pipe_meta = new NDPPipeMeta
 }
 
 
 @chiselName
-class Ingress(implicit p: Parameters) extends Module {
-  val io = IO(new LNICPISAIngressIO)
+class NDPIngress(implicit p: Parameters) extends Module {
+  val io = IO(new NDPIngressIO)
 
   val parserPktQueue_out = Wire(Flipped(Decoupled(new StreamChannel(NET_DP_BITS))))
-  val headers = Wire(new Headers)
-  val headers_reg = Reg(Valid(new Headers))
+  val headers = Wire(new NDPHeaders)
+  val headers_reg = Reg(Valid(new NDPHeaders))
   headers_reg.valid := false.B // default
 
   val maPktQueue_in = Wire(Decoupled(new StreamChannel(NET_DP_BITS)))
@@ -150,8 +93,8 @@ class Ingress(implicit p: Parameters) extends Module {
   maPktQueue_out.ready := false.B // default
 
   // need metadata queue to synchronize metadata with pkt payload
-  val maMetaQueue_in = Wire(Decoupled(new PipelineRegs))
-  val maMetaQueue_out = Wire(Flipped(Decoupled(new PipelineRegs)))
+  val maMetaQueue_in = Wire(Decoupled(new NDPPipelineRegs))
+  val maMetaQueue_out = Wire(Flipped(Decoupled(new NDPPipelineRegs)))
   maMetaQueue_in.valid := false.B // default
   maMetaQueue_out.ready := false.B // default
 
@@ -181,8 +124,8 @@ class Ingress(implicit p: Parameters) extends Module {
   switch(parseState) {
     is (sWordOne) {
       when (parserPktQueue_out.valid && !reset.toBool) {
-        headers := (new Headers).fromBits(reverse_bytes(parserPktQueue_out.bits.data, NET_DP_BYTES))
-        when (headers.eth_type === IPV4_TYPE && headers.ip_proto === LNIC_PROTO && !parserPktQueue_out.bits.last) {
+        headers := (new NDPHeaders).fromBits(reverse_bytes(parserPktQueue_out.bits.data, NET_DP_BYTES))
+        when (headers.eth_type === IPV4_TYPE && headers.ip_proto === NDP_PROTO && !parserPktQueue_out.bits.last) {
           // this is an LNIC pkt
           // start M/A processing
           headers_reg.valid := true.B
@@ -215,10 +158,10 @@ class Ingress(implicit p: Parameters) extends Module {
   /* M/A Processing Pipeline */
   /***************************/
 
-  val rx_info_stage1 = Reg(Valid(new PipelineRegs))
-  val rx_info_stage2 = Reg(Valid(new PipelineRegs))
-  val credit_stage1 = Reg(Valid(new PipelineRegs))
-  val credit_stage2 = Reg(Valid(new PipelineRegs))
+  val rx_info_stage1 = Reg(Valid(new NDPPipelineRegs))
+  val rx_info_stage2 = Reg(Valid(new NDPPipelineRegs))
+  val credit_stage1 = Reg(Valid(new NDPPipelineRegs))
+  val credit_stage2 = Reg(Valid(new NDPPipelineRegs))
 
   maPktQueue_out <> Queue(maPktQueue_in, MA_PKT_QUEUE_FLITS)
   maMetaQueue_out <> Queue(maMetaQueue_in, MA_META_QUEUE_FLITS)
@@ -229,32 +172,42 @@ class Ingress(implicit p: Parameters) extends Module {
   when (headers_reg.valid && !reset.toBool) {
     // fill out as much metadata as we can right now
     rx_info_stage1.bits.ingress_meta.src_ip      := headers_reg.bits.ip_src
-    rx_info_stage1.bits.ingress_meta.src_context := headers_reg.bits.lnic_src
-    rx_info_stage1.bits.ingress_meta.msg_len     := headers_reg.bits.lnic_msg_len
-    rx_info_stage1.bits.ingress_meta.pkt_offset  := headers_reg.bits.lnic_pkt_offset
-    rx_info_stage1.bits.ingress_meta.dst_context := headers_reg.bits.lnic_dst
+    rx_info_stage1.bits.ingress_meta.src_context := headers_reg.bits.ndp_src
+    rx_info_stage1.bits.ingress_meta.msg_len     := headers_reg.bits.ndp_msg_len
+    rx_info_stage1.bits.ingress_meta.pkt_offset  := headers_reg.bits.ndp_pkt_offset
+    rx_info_stage1.bits.ingress_meta.dst_context := headers_reg.bits.ndp_dst
     rx_info_stage1.bits.ingress_meta.rx_msg_id   := 0.U // default
-    rx_info_stage1.bits.ingress_meta.tx_msg_id   := headers_reg.bits.lnic_tx_msg_id
+    rx_info_stage1.bits.ingress_meta.tx_msg_id   := headers_reg.bits.ndp_tx_msg_id
+    rx_info_stage1.bits.ingress_meta.is_last_pkt := false.B // default
     rx_info_stage1.bits.pipe_meta.drop           := false.B // default
-    rx_info_stage1.bits.pipe_meta.flags          := headers_reg.bits.lnic_flags
-    rx_info_stage1.bits.pipe_meta.buf_ptr        := headers_reg.bits.lnic_buf_ptr
-    rx_info_stage1.bits.pipe_meta.buf_size_class := headers_reg.bits.lnic_buf_size_class
-    rx_info_stage1.bits.pipe_meta.pull_offset    := headers_reg.bits.lnic_pull_offset
+    rx_info_stage1.bits.pipe_meta.flags          := headers_reg.bits.ndp_flags
+    rx_info_stage1.bits.pipe_meta.buf_ptr        := headers_reg.bits.ndp_buf_ptr
+    rx_info_stage1.bits.pipe_meta.buf_size_class := headers_reg.bits.ndp_buf_size_class
+    rx_info_stage1.bits.pipe_meta.pull_offset    := headers_reg.bits.ndp_pull_offset
     rx_info_stage1.bits.pipe_meta.genACK         := false.B // default
     rx_info_stage1.bits.pipe_meta.genNACK        := false.B // default
     rx_info_stage1.bits.pipe_meta.genPULL        := false.B // default
     rx_info_stage1.bits.pipe_meta.expect_resp    := false.B // default
-    when ((headers_reg.bits.lnic_flags & DATA_MASK) > 0.U) {
+    when ((headers_reg.bits.ndp_flags & DATA_MASK) > 0.U) {
       // this is a DATA pkt
       rx_info_stage1.bits.pipe_meta.is_data := true.B
+
+      val is_chopped = Wire(Bool())
+      is_chopped := (headers_reg.bits.ndp_flags & CHOP_MASK) > 0.U
+      // do not pass CHOP pkts to the assembly module
+      rx_info_stage1.bits.pipe_meta.drop := !is_chopped
+
+      // NOTE: Both DATA and CHOP'ed DATA pkts need to invoke get_rx_msg_info
+      // because they both need to access the creditReg to compute the PULL offset.
+
       // invoke get_rx_msg_info extern
       io.get_rx_msg_info.req.valid := true.B
+      io.get_rx_msg_info.req.bits.mark_received := !is_chopped // CHOP pkts don't have any data
       io.get_rx_msg_info.req.bits.src_ip      := headers_reg.bits.ip_src
-      io.get_rx_msg_info.req.bits.src_context := headers_reg.bits.lnic_src
-      io.get_rx_msg_info.req.bits.tx_msg_id   := headers_reg.bits.lnic_tx_msg_id
-      io.get_rx_msg_info.req.bits.msg_len     := headers_reg.bits.lnic_msg_len
-      io.get_rx_msg_info.req.bits.pkt_offset  := headers_reg.bits.lnic_pkt_offset
-      io.get_rx_msg_info.req.bits.is_chopped  := (headers_reg.bits.lnic_flags & CHOP_MASK) > 0.U
+      io.get_rx_msg_info.req.bits.src_context := headers_reg.bits.ndp_src
+      io.get_rx_msg_info.req.bits.tx_msg_id   := headers_reg.bits.ndp_tx_msg_id
+      io.get_rx_msg_info.req.bits.msg_len     := headers_reg.bits.ndp_msg_len
+      io.get_rx_msg_info.req.bits.pkt_offset  := headers_reg.bits.ndp_pkt_offset
     } .otherwise {
       // this is an ACK/NACK/PULL pkt
       rx_info_stage1.bits.pipe_meta.is_data := false.B
@@ -277,18 +230,23 @@ class Ingress(implicit p: Parameters) extends Module {
       credit_stage1.bits.pipe_meta.genNACK := false.B
       credit_stage1.bits.pipe_meta.genPULL := true.B
 
+      // rx_msg_id must be passed to Assembly module (for DATA pkts)
+      credit_stage1.bits.ingress_meta.rx_msg_id := io.get_rx_msg_info.resp.bits.rx_msg_id
+
+      // get_rx_msg_info extern indicates if this is the last pkt of the msg.
+      // Need to pass this flag to the Assembly module so it can schedule the msg for
+      // delivery to the CPU.
+      credit_stage1.bits.ingress_meta.is_last_pkt := io.get_rx_msg_info.resp.bits.is_last_pkt
+
       val pull_offset_diff = Wire(UInt(CREDIT_BITS.W))
       pull_offset_diff := 0.U
       when ((rx_info_stage2.bits.pipe_meta.flags & CHOP_MASK) > 0.U) {
         // this is a chopped data pkt
         credit_stage1.bits.pipe_meta.genNACK := true.B
-        credit_stage1.bits.pipe_meta.drop := true.B
       } .otherwise {
         // this is a normal data pkt
         credit_stage1.bits.pipe_meta.genACK := true.B
         pull_offset_diff := 1.U
-        // fill out metadata for pkt going to CPU
-        credit_stage1.bits.ingress_meta.rx_msg_id := io.get_rx_msg_info.resp.bits.rx_msg_id
       }
 
       when (io.get_rx_msg_info.resp.bits.fail) {
@@ -314,6 +272,12 @@ class Ingress(implicit p: Parameters) extends Module {
       assert(io.creditReg.resp.valid, "creditReg extern call failed to return result after 2 cycles!")
       val pull_offset = io.creditReg.resp.bits.new_val
 
+      val flags = Wire(UInt(8.W))
+      val ack_flag  = Mux(credit_stage2.bits.pipe_meta.genACK, ACK_MASK, 0.U) 
+      val nack_flag = Mux(credit_stage2.bits.pipe_meta.genNACK, NACK_MASK, 0.U)
+      val pull_flag = Mux(credit_stage2.bits.pipe_meta.genPULL, PULL_MASK, 0.U)
+      flags := ack_flag | nack_flag | pull_flag
+
       // fire control pkt event
       // TODO: this only fires when the pkt is successfully allocated a buffer & rx_msg_id.
       //   This means that when a pkt fails to be allocated a buffer & rx_msg_id, it will be
@@ -327,10 +291,11 @@ class Ingress(implicit p: Parameters) extends Module {
       io.ctrlPkt.bits.tx_msg_id      := credit_stage2.bits.ingress_meta.tx_msg_id
       io.ctrlPkt.bits.buf_ptr        := credit_stage2.bits.pipe_meta.buf_ptr
       io.ctrlPkt.bits.buf_size_class := credit_stage2.bits.pipe_meta.buf_size_class
-      io.ctrlPkt.bits.pull_offset    := pull_offset
-      io.ctrlPkt.bits.genACK         := credit_stage2.bits.pipe_meta.genACK
-      io.ctrlPkt.bits.genNACK        := credit_stage2.bits.pipe_meta.genNACK
-      io.ctrlPkt.bits.genPULL        := credit_stage2.bits.pipe_meta.genPULL
+      io.ctrlPkt.bits.grant_offset   := pull_offset
+      io.ctrlPkt.bits.grant_prio     := 0.U // unused for NDP
+      io.ctrlPkt.bits.flags          := flags
+      io.ctrlPkt.bits.is_new_msg     := false.B
+      io.ctrlPkt.bits.is_rtx         := false.B
 
     } .otherwise {
       when ((credit_stage2.bits.pipe_meta.flags & ACK_MASK) > 0.U) {

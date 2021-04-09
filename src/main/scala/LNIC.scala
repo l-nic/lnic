@@ -26,12 +26,15 @@ object LNICConsts {
   def NET_CPU_FULL_KEEP = ~0.U(XBYTES.W)
 
   val IPV4_TYPE = "h0800".U(16.W)
-  val LNIC_PROTO = "h99".U(8.W)
-  val DATA_MASK = "b00000001".U(8.W)
-  val ACK_MASK  = "b00000010".U(8.W)
-  val NACK_MASK = "b00000100".U(8.W)
-  val PULL_MASK = "b00001000".U(8.W)
-  val CHOP_MASK = "b00010000".U(8.W)
+  val NDP_PROTO  = "h99".U(8.W)
+  val HOMA_PROTO = "h98".U(8.W)
+
+  val DATA_MASK  = "b00000001".U(8.W)
+  val ACK_MASK   = "b00000010".U(8.W)
+  val NACK_MASK  = "b00000100".U(8.W)
+  val PULL_MASK  = "b00001000".U(8.W) // for NDP
+  val GRANT_MASK = "b00001000".U(8.W) // for Homa
+  val CHOP_MASK  = "b00010000".U(8.W)
 
   val IP_HDR_BYTES = 20
   val LNIC_HDR_BYTES = 30
@@ -44,6 +47,12 @@ object LNICConsts {
   val PKT_OFFSET_BITS = 8
   val CREDIT_BITS = 16
   val TIMER_BITS = 64
+
+  /**** Homa Consts ****/
+  val HOMA_PRIO_BITS = 8
+  val HOMA_OVERCOMMITMENT_LEVEL = 3
+  val HOMA_NUM_UNSCHEDULED_PRIOS = 2
+  /*********************/
 
   // TODO(sibanez): maybe these should be parameters as well?
   val MAX_SEG_LEN_BYTES = 1024
@@ -65,11 +74,6 @@ object LNICConsts {
   // they are being transmitted.
   val SCHEDULED_PKTS_Q_DEPTH = 256
   val PACED_PKTS_Q_DEPTH = 256
-
-  // Default L-NIC parameter values
-  // Will now be provided via the LNICBridge
-  // val TIMEOUT_CYCLES = 30000 // ~10us @ 3GHz
-  // val RTT_PKTS = 5
 
   // this is used to decide how many bits of the src IP to look at when allocating rx msg IDs
   val MAX_NUM_HOSTS = 16
@@ -100,8 +104,9 @@ object LNICConsts {
 }
 
 case class LNICParams(
-  max_rx_max_msgs_per_context:  Int = LNICConsts.MAX_RX_MAX_MSGS_PER_CONTEXT,
-  max_num_hosts: Int = LNICConsts.MAX_NUM_HOSTS
+  max_rx_max_msgs_per_context: Int = LNICConsts.MAX_RX_MAX_MSGS_PER_CONTEXT,
+  max_num_hosts: Int = LNICConsts.MAX_NUM_HOSTS,
+  transport: String = "NDP" // options: "NDP", "Homa"
 )
 
 case object LNICKey extends Field[Option[LNICParams]](None)
@@ -203,19 +208,41 @@ class LNIC(implicit p: Parameters) extends LazyModule {
 class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(outer) {
   val io = IO(new LNICIO)
 
+  val transport = p(LNICKey).get.transport
   val num_cores = p(RocketTilesKey).size
 
   // NIC datapath
-  val pisa_ingress = Module(new Ingress)
-  val pisa_egress = Module(new Egress)
   val assemble = Module(new LNICAssemble)
   val packetize = Module(new LNICPacketize)
   val rx_queues = Module(new GlobalRxQueues)
-
   val msg_timers = Module(new LNICTimers)
-  val credit_reg = Module(new IfElseRaw)
-  val pkt_gen = Module(new LNICPktGen)
   val arbiter = Module(new LNICArbiter)
+
+  if (transport == "NDP") {
+    println("Building LNIC with NDP transport!")
+  } else if (transport == "Homa") {
+    println("Building LNIC with Homa transport!")
+  } else {
+    require(false, "Unsupported LNIC transport: " + transport)
+  }
+
+  val pisa_ingress = if (transport == "NDP")  Some(Module(new NDPIngress))
+                else if (transport == "Homa") Some(Module(new HomaIngress))
+                else None
+  val pisa_egress  = if (transport == "NDP")  Some(Module(new NDPEgress))
+                else if (transport == "Homa") Some(Module(new HomaEgress))
+                else None
+  val pkt_gen      = if (transport == "NDP")  Some(Module(new NDPPktGen))
+                else if (transport == "Homa") Some(Module(new HomaPktGen))
+                else None
+
+  // NDP externs
+  val credit_reg = if (transport == "NDP") Some(Module(new IfElseRaw)) else None
+
+  // Homa externs
+  val pending_msg_reg = if (transport == "Homa") Some(Module(new PendingMsgReg)) else None
+  val grant_scheduler = if (transport == "Homa") Some(Module(new GrantScheduler)) else None 
+  val tx_msg_prio_reg = if (transport == "Homa") Some(Module(new TxMsgPrioReg)) else None
 
   val lnic_reset_done = Wire(Bool())
   val lnic_reset_done_reg = RegNext(lnic_reset_done)
@@ -230,18 +257,34 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
   ////////////////////////////////
   /* Event / Extern Connections */
   ////////////////////////////////
-  credit_reg.io <> pisa_ingress.io.creditReg
-  assemble.io.get_rx_msg_info <> pisa_ingress.io.get_rx_msg_info
-  packetize.io.delivered := pisa_ingress.io.delivered
-  packetize.io.creditToBtx := pisa_ingress.io.creditToBtx
-  pkt_gen.io.ctrlPkt := pisa_ingress.io.ctrlPkt
-  pisa_ingress.io.rtt_pkts := io.net.rtt_pkts
+  assemble.io.get_rx_msg_info <> pisa_ingress.get.io.get_rx_msg_info
+  packetize.io.delivered := pisa_ingress.get.io.delivered
+  packetize.io.creditToBtx := pisa_ingress.get.io.creditToBtx
+  pisa_ingress.get.io.rtt_pkts := io.net.rtt_pkts
   msg_timers.io.schedule := packetize.io.schedule
   msg_timers.io.reschedule := packetize.io.reschedule
   msg_timers.io.cancel := packetize.io.cancel
   packetize.io.timeout := msg_timers.io.timeout
   packetize.io.timeout_cycles := io.net.timeout_cycles
   packetize.io.rtt_pkts := io.net.rtt_pkts
+  pisa_egress.get.io.nic_mac_addr := io.net.nic_mac_addr
+  pisa_egress.get.io.switch_mac_addr := io.net.switch_mac_addr
+  pisa_egress.get.io.nic_ip_addr := io.net.nic_ip_addr
+  if (transport == "NDP") {
+    credit_reg.get.io <> pisa_ingress.get.io.creditReg
+    pkt_gen.get.io.ctrlPkt := pisa_ingress.get.io.ctrlPkt
+  } else if (transport == "Homa") {
+    pisa_egress.get.io.rtt_pkts := io.net.rtt_pkts
+    pkt_gen.get.io.ackPkt   := pisa_ingress.get.io.ackPkt
+    pkt_gen.get.io.grantPkt := pisa_ingress.get.io.grantPkt
+    pending_msg_reg.get.io <> pisa_ingress.get.io.pendingMsgReg
+    grant_scheduler.get.io <> pisa_ingress.get.io.grantScheduler
+    // Wire up tx_msg_prio_reg to ingress and egress pipelines
+    tx_msg_prio_reg.get.io.ingress_req := pisa_ingress.get.io.txMsgPrioReg_req
+    tx_msg_prio_reg.get.io.egress_req := pisa_egress.get.io.txMsgPrioReg_req
+    pisa_egress.get.io.txMsgPrioReg_resp := tx_msg_prio_reg.get.io.egress_resp
+  }
+
 
   //////////////////////////
   /* Datapath Connections */
@@ -251,11 +294,11 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
   net_in_queue_deq <> Queue(io.net.in, LNICConsts.MTU_BYTES/LNICConsts.NET_IF_BYTES * 2)
 
   // 64-bit => 512-bit
-  StreamWidthAdapter(pisa_ingress.io.net_in,
+  StreamWidthAdapter(pisa_ingress.get.io.net_in,
                      net_in_queue_deq)
 
-  assemble.io.net_in <> pisa_ingress.io.net_out
-  assemble.io.meta_in := pisa_ingress.io.meta_out
+  assemble.io.net_in <> pisa_ingress.get.io.net_out
+  assemble.io.meta_in := pisa_ingress.get.io.meta_out
 
   rx_queues.io.net_in <> assemble.io.net_out
   rx_queues.io.meta_in := assemble.io.meta_out 
@@ -274,18 +317,15 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
   arbiter.io.data_in <> packetize.io.net_out
   arbiter.io.data_meta_in := packetize.io.meta_out
 
-  arbiter.io.ctrl_in <> pkt_gen.io.net_out
-  arbiter.io.ctrl_meta_in := pkt_gen.io.meta_out
+  arbiter.io.ctrl_in <> pkt_gen.get.io.net_out
+  arbiter.io.ctrl_meta_in := pkt_gen.get.io.meta_out
 
-  pisa_egress.io.net_in <> arbiter.io.net_out
-  pisa_egress.io.meta_in := arbiter.io.meta_out
-  pisa_egress.io.nic_mac_addr := io.net.nic_mac_addr
-  pisa_egress.io.switch_mac_addr := io.net.switch_mac_addr
-  pisa_egress.io.nic_ip_addr := io.net.nic_ip_addr
+  pisa_egress.get.io.net_in <> arbiter.io.net_out
+  pisa_egress.get.io.meta_in := arbiter.io.meta_out
 
   // 512-bit => 64-bit
   StreamWidthAdapter(io.net.out,
-                     pisa_egress.io.net_out)
+                     pisa_egress.get.io.net_out)
 
 }
 

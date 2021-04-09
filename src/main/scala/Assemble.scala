@@ -20,7 +20,7 @@ import LNICConsts._
  */
 class AssembleIO extends Bundle {
   val net_in = Flipped(Decoupled(new StreamChannel(NET_DP_BITS)))
-  val meta_in = Flipped(Valid(new PISAIngressMetaOut))
+  val meta_in = Flipped(Valid(new IngressMetaOut))
   val net_out = Decoupled(new StreamChannel(NET_DP_BITS))
   val meta_out = Valid(new AssembleMetaOut)
   val get_rx_msg_info = Flipped(new GetRxMsgInfoIO)
@@ -29,9 +29,44 @@ class AssembleIO extends Bundle {
   override def cloneType = new AssembleIO().asInstanceOf[this.type]
 }
 
+class IngressMetaOut extends Bundle {
+  // metadata for pkts going to CPU
+  val src_ip       = UInt(32.W)
+  val src_context  = UInt(LNIC_CONTEXT_BITS.W)
+  val msg_len      = UInt(MSG_LEN_BITS.W)
+  val pkt_offset   = UInt(PKT_OFFSET_BITS.W)
+  val dst_context  = UInt(LNIC_CONTEXT_BITS.W)
+  val rx_msg_id    = UInt(MSG_ID_BITS.W)
+  val tx_msg_id    = UInt(MSG_ID_BITS.W)
+  val is_last_pkt  = Bool()
+}
+
 class AssembleMetaOut extends Bundle {
   val app_hdr = new RxAppHdr
   val dst_context = UInt(LNIC_CONTEXT_BITS.W)
+}
+
+class GetRxMsgInfoIO extends Bundle {
+  val req = Valid(new GetRxMsgInfoReq)
+  val resp = Flipped(Valid(new GetRxMsgInfoResp))
+}
+
+class GetRxMsgInfoReq extends Bundle {
+  val mark_received = Bool()
+  val src_ip = UInt(32.W)
+  val src_context = UInt(LNIC_CONTEXT_BITS.W)
+  val tx_msg_id = UInt(MSG_ID_BITS.W)
+  val msg_len = UInt(MSG_LEN_BITS.W)
+  val pkt_offset = UInt(PKT_OFFSET_BITS.W)
+}
+
+class GetRxMsgInfoResp extends Bundle {
+  val fail = Bool()
+  val rx_msg_id = UInt(MSG_ID_BITS.W)
+  val is_new_msg = Bool()
+  val is_new_pkt = Bool()
+  val is_last_pkt = Bool()
+  val ackNo = UInt((PKT_OFFSET_BITS + 1).W) // ackNo needs to reach max_num_pkts + 1
 }
 
 class BufInfoTableEntry extends Bundle {
@@ -52,9 +87,7 @@ class RxMsgIdTableEntry(val msg_id_bits: Int) extends Bundle {
   val valid = Bool()
   val rx_msg_id = UInt(msg_id_bits.W)
   // Keep track of which pkts of the msg have already been received.
-  // Do not let a pkt into the reassembly module if it has already been received.
-  // This is because if the final pkt of the msg is received multiple
-  // times it would cause the msg to scheduled multiple times.
+  // Use this state to compute: is_new_pkt, is_last_pkt, and ackNo
   val received_pkts = UInt(MAX_SEGS_PER_MSG.W)
 
   override def cloneType = new RxMsgIdTableEntry(msg_id_bits).asInstanceOf[this.type]
@@ -103,12 +136,7 @@ class LNICAssemble(implicit p: Parameters) extends Module {
   // RAM used to store msgs while they are being reassembled and delivered to the CPU.
   //   Msgs are stored in words that are the same size as the datapath width.
   val msg_buffer_ram = SyncReadMem(NUM_MSG_BUFFER_WORDS, UInt(NET_DP_BITS.W))
-  // table mapping {rx_msg_id => received_bitmap}
-  val received_table = Module(new TrueDualPortRAM(MAX_SEGS_PER_MSG, NUM_MSG_BUFFERS))
-  received_table.io.clock := clock
-  received_table.io.reset := reset
-  received_table.io.portA.we := false.B
-  received_table.io.portB.we := false.B
+
   // table mapping {rx_msg_id => buffer info}
   val buf_info_table = SyncReadMem(NUM_MSG_BUFFERS, new BufInfoTableEntry())
 
@@ -142,7 +170,7 @@ class LNICAssemble(implicit p: Parameters) extends Module {
 
   /* GetRxMsgInfo State Machine:
    *   - Process get_rx_msg_info() extern function calls
-   *   - Returns rx_msg_id (or all 1's if failure)
+   *   - Returns: fail, rx_msg_id, is_new_msg, is_new_pkt, is_last_pkt, ackNo
    *   - Initialize rx msg state
    *
    * Description states:
@@ -150,19 +178,18 @@ class LNICAssemble(implicit p: Parameters) extends Module {
    *   - Lookup the unique msg identifier in the rx_msg_id_table: key = {src_ip, src_context, tx_msg_id}
    *   - Perform computations to see if there is a buffer and rx_msg_id available (in case this is a new msg)
    * sWriteback:
-   *   - Return result of extern function call: {failure, rx_msg_id}
-   *   - Write rx_msg_id_table[key] = rx_msg_id
+   *   - Return result of extern function call
+   *   - Write rx_msg_id_table[key] = {rx_msg_id, recevied_pkts}
    *   - Write buf_info_table[rx_msg_id] = buf_info
-   *   - Write received_table[rx_msg_id] = 0
    *   - Write app_hdr_table[rx_msg_id] = {src_ip, src_context, msg_len}
-   * TODO(sibanez): Need to read received_table[rx_msg_id] in sWriteback and add a
-   *   pipeline stage to process the received bitmap and return the result.
+   * TODO(sibanez): should this return the buf_info as well so that the enqueue state machine
+   *   doesn't need to look it up again?
    */
   val sLookupMsg :: sWriteback :: Nil = Enum(2)
   val stateRxMsgInfo = RegInit(sLookupMsg)
 
   // register the extern function call request parameters
-  // NOTE: this assumes requests will not arrive on back-to-back cycles - TODO: may want to check this assumption
+  // NOTE: this assumes requests will not arrive on back-to-back cycles, which is valid for this implementation
   val get_rx_msg_info_req_reg = RegNext(io.get_rx_msg_info.req)
   val get_rx_msg_info_req_reg_reg = RegNext(get_rx_msg_info_req_reg)
 
@@ -217,32 +244,50 @@ class LNICAssemble(implicit p: Parameters) extends Module {
       // Get result of reading the rx_msg_id_table
       cur_rx_msg_id_table_entry := (new RxMsgIdTableEntry(msg_id_bits)).fromBits(rx_msg_id_table.io.portA.dout)
       val pkt_mask = Wire(UInt(MAX_SEGS_PER_MSG.W))
-      pkt_mask := Mux(get_rx_msg_info_req_reg_reg.bits.is_chopped,
-                        0.U, // chopped pkts don't count as any pkts
-                        1.U << get_rx_msg_info_req_reg_reg.bits.pkt_offset)
+      pkt_mask := Mux(get_rx_msg_info_req_reg_reg.bits.mark_received,
+          (1.U << get_rx_msg_info_req_reg_reg.bits.pkt_offset),
+          0.U)
+
+      // these fields are driven below
+      val is_new_pkt = Wire(Bool())
+      val new_received_pkts = Wire(UInt((MAX_SEGS_PER_MSG + 1).W)) // +1 so we can compute ackNo, which needs to reach max_num_pkts+1
+
+      // Check if this is the last pkt of the msg
+      val msg_len_pkts = MsgBufHelpers.compute_num_pkts(get_rx_msg_info_req_reg_reg.bits.msg_len)
+      val all_pkts = Wire(UInt(MAX_SEGS_PER_MSG.W))
+      all_pkts := (1.U << msg_len_pkts) - 1.U
+      val is_last_pkt = Wire(Bool())
+      is_last_pkt := (new_received_pkts === all_pkts)
+
+      val ackNo = Wire(UInt())
+      // Compute the ackNo (i.e. the offset of the first unreceived pkt)
+      ackNo := PriorityEncoder(~new_received_pkts)
+
+      io.get_rx_msg_info.resp.bits.is_new_pkt  := is_new_pkt
+      io.get_rx_msg_info.resp.bits.is_last_pkt := is_last_pkt
+      io.get_rx_msg_info.resp.bits.ackNo       := ackNo
+
       when (cur_rx_msg_id_table_entry.valid) {
         // This msg has already been allocated an rx_msg_id
+        // drive get_rx_msg_info response
+        io.get_rx_msg_info.resp.bits.fail        := false.B
+        io.get_rx_msg_info.resp.bits.rx_msg_id   := Cat(0.U((MSG_ID_BITS - msg_id_bits).W), cur_rx_msg_id_table_entry.rx_msg_id)
+        io.get_rx_msg_info.resp.bits.is_new_msg  := false.B
+
         // Check if we've already received this pkt or if it's a new pkt
-        val is_new_pkt = Wire(Bool())
         is_new_pkt := (cur_rx_msg_id_table_entry.received_pkts & pkt_mask) === 0.U
-        when (is_new_pkt) {
-          // Only allow new pkts into the assmebly module
-          io.get_rx_msg_info.resp.bits.fail := false.B
-          io.get_rx_msg_info.resp.bits.rx_msg_id := Cat(0.U((MSG_ID_BITS - msg_id_bits).W), cur_rx_msg_id_table_entry.rx_msg_id)
-          io.get_rx_msg_info.resp.bits.is_new_msg := false.B
-          // Update rx_msg_id_table to remember that we've received the pkt
-          new_rx_msg_id_table_entry.valid := true.B
-          new_rx_msg_id_table_entry.rx_msg_id := cur_rx_msg_id_table_entry.rx_msg_id
-          new_rx_msg_id_table_entry.received_pkts := cur_rx_msg_id_table_entry.received_pkts | pkt_mask
-          rx_msg_id_table.io.portA.addr := msg_key_reg.asUInt
-          rx_msg_id_table.io.portA.we := true.B
-          rx_msg_id_table.io.portA.din := new_rx_msg_id_table_entry.asUInt
-        } .otherwise {
-          // We've already received this pkt -- don't let it in again
-          io.get_rx_msg_info.resp.bits.fail := true.B
-          io.get_rx_msg_info.resp.bits.rx_msg_id := 0.U
-          io.get_rx_msg_info.resp.bits.is_new_msg := true.B
-        }
+
+        // Compute how to update the received_pkts state
+        new_received_pkts := Cat(0.U(1.W), cur_rx_msg_id_table_entry.received_pkts | pkt_mask)
+
+        // Update rx_msg_id_table to remember that we've received the pkt
+        new_rx_msg_id_table_entry.valid := true.B
+        new_rx_msg_id_table_entry.rx_msg_id := cur_rx_msg_id_table_entry.rx_msg_id
+        new_rx_msg_id_table_entry.received_pkts := new_received_pkts
+        rx_msg_id_table.io.portA.addr := msg_key_reg.asUInt
+        rx_msg_id_table.io.portA.we := true.B
+        rx_msg_id_table.io.portA.din := new_rx_msg_id_table_entry.asUInt
+
       } .elsewhen (allocation_success_reg) {
         // This is a new msg and we can allocate a buffer and rx_msg_id
         io.get_rx_msg_info.resp.bits.fail := false.B
@@ -252,10 +297,14 @@ class LNICAssemble(implicit p: Parameters) extends Module {
         // read from rx_msg_id freelist
         assert(rx_msg_id_freelist.io.deq.valid, "There is an available buffer but not an available rx_msg_id?")
         rx_msg_id_freelist.io.deq.ready := true.B
+
+        is_new_pkt := true.B
+        new_received_pkts := Cat(0.U(1.W), pkt_mask)
+
         // update rx_msg_id_table
         new_rx_msg_id_table_entry.valid := true.B
         new_rx_msg_id_table_entry.rx_msg_id := rx_msg_id // truncate
-        new_rx_msg_id_table_entry.received_pkts := pkt_mask
+        new_rx_msg_id_table_entry.received_pkts := new_received_pkts
         rx_msg_id_table.io.portA.addr := msg_key_reg.asUInt
         rx_msg_id_table.io.portA.we := true.B
         rx_msg_id_table.io.portA.din := new_rx_msg_id_table_entry.asUInt
@@ -267,10 +316,6 @@ class LNICAssemble(implicit p: Parameters) extends Module {
         new_buf_info_table_entry.buf_size := size_class_buf_sizes(size_class_reg)
         new_buf_info_table_entry.size_class := size_class_reg
         buf_info_table(rx_msg_id) := new_buf_info_table_entry
-        // update received_table
-        received_table.io.portA.addr := rx_msg_id
-        received_table.io.portA.we := true.B
-        received_table.io.portA.din := 0.U
       } .otherwise {
         // This is a new msg and we cannot allocate a buffer and rx_msg_id
         io.get_rx_msg_info.resp.bits.fail := true.B
@@ -280,10 +325,6 @@ class LNICAssemble(implicit p: Parameters) extends Module {
     }
   }
 
-  // TODO(sibanez): this state machine exerts backpressure on the first cycle of every pkt.
-  //   It does this because it needs 2 cycles to perform RMW of received_table[rx_msg_id].
-  //   There is a way to avoid backpressuring all but single-cycle pkts, but is it worth implementing?
-  //   This will still process pkts at line rate if the clock is 400MHz.
   /* Enqueue State Machine:
    *   - Enqueue incomming pkts into the appropriate msg buffer
    *   - Mark the corresponding pkt as having been received
@@ -307,7 +348,7 @@ class LNICAssemble(implicit p: Parameters) extends Module {
   val sEnqStart :: sEnqWordOne :: sEnqFinishPkt :: Nil = Enum(3)
   val stateEnq = RegInit(sEnqStart)
 
-  val meta_in_bits_reg = Reg(new PISAIngressMetaOut())
+  val meta_in_bits_reg = Reg(new IngressMetaOut())
 
   val max_words_per_pkt = MAX_SEG_LEN_BYTES/NET_DP_BYTES
   require(isPow2(max_words_per_pkt))
@@ -317,8 +358,6 @@ class LNICAssemble(implicit p: Parameters) extends Module {
   val enq_buf_info_table_port = buf_info_table(enq_rx_msg_id)
   val buf_info = Wire(new BufInfoTableEntry())
   val buf_info_reg = Reg(new BufInfoTableEntry())
-  // received_table read result
-  val enq_received = Wire(UInt(MAX_SEGS_PER_MSG.W))
   // msg_buffer_ram write port
   val pkt_word_ptr = Wire(UInt(BUF_PTR_BITS.W))
   val enq_msg_buffer_ram_port = msg_buffer_ram(pkt_word_ptr)
@@ -329,7 +368,6 @@ class LNICAssemble(implicit p: Parameters) extends Module {
   // defaults
   io.net_in.ready := true.B
   enq_rx_msg_id := io.meta_in.bits.rx_msg_id
-  received_table.io.portB.addr := enq_rx_msg_id
   scheduled_msgs_enq.valid := false.B
 
   switch (stateEnq) {
@@ -352,22 +390,13 @@ class LNICAssemble(implicit p: Parameters) extends Module {
         pkt_word_ptr := pkt_ptr
         enq_msg_buffer_ram_port := io.net_in.bits.data
         pkt_word_count := 1.U
-        // mark pkt as received
-        enq_received := received_table.io.portB.dout
-        val new_enq_received = Wire(UInt(MAX_SEGS_PER_MSG.W))
-        new_enq_received := enq_received | (1.U << io.meta_in.bits.pkt_offset)
-        received_table.io.portB.we := !reset.toBool
-        received_table.io.portB.din := new_enq_received
-        // check if the whole msg has been received
-        val num_pkts = MsgBufHelpers.compute_num_pkts(io.meta_in.bits.msg_len)
-        val all_pkts = Wire(UInt(MAX_SEGS_PER_MSG.W))
-        all_pkts := (1.U << num_pkts) - 1.U
-        val msg_complete = (new_enq_received === all_pkts)
-        msg_complete_reg := msg_complete
+
+        msg_complete_reg := meta_in_bits_reg.is_last_pkt
+
         // state transition
         when (io.net_in.bits.last) {
             stateEnq := sEnqStart
-            when (msg_complete) {
+            when (meta_in_bits_reg.is_last_pkt) {
                 // schedule msg for delivery to the CPU
                 schedule_msg(meta_in_bits_reg.dst_context,
                              meta_in_bits_reg.rx_msg_id,

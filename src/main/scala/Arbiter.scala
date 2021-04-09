@@ -16,13 +16,13 @@ import LNICConsts._
 class ArbiterIO extends Bundle {
   // Generated control pkts
   val ctrl_in = Flipped(Decoupled(new StreamChannel(NET_DP_BITS)))
-  val ctrl_meta_in = Flipped(Valid(new PISAEgressMetaIn))
+  val ctrl_meta_in = Flipped(Valid(new EgressMetaIn))
   // Packetized data pkts
   val data_in = Flipped(Decoupled(new StreamChannel(NET_DP_BITS)))
-  val data_meta_in = Flipped(Valid (new PISAEgressMetaIn))
+  val data_meta_in = Flipped(Valid (new EgressMetaIn))
   // Serialized pkts
   val net_out = Decoupled(new StreamChannel(NET_DP_BITS))
-  val meta_out = Valid(new PISAEgressMetaIn)
+  val meta_out = Valid(new EgressMetaIn)
 }
 
 @chiselName
@@ -30,8 +30,8 @@ class LNICArbiter(implicit p: Parameters) extends Module {
   val io = IO(new ArbiterIO)
 
   val pktQueue_in = Wire(Decoupled(new StreamChannel(NET_DP_BITS)))
-  val metaQueue_in = Wire(Decoupled(new PISAEgressMetaIn))
-  val metaQueue_out = Wire(Flipped(Decoupled(new PISAEgressMetaIn)))
+  val metaQueue_in = Wire(Decoupled(new EgressMetaIn))
+  val metaQueue_out = Wire(Flipped(Decoupled(new EgressMetaIn)))
 
   // Set up output queues
   // TODO(sibanez): use params or consts here?

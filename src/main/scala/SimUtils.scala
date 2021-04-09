@@ -111,7 +111,7 @@ class Timestamp(to_nic: Boolean = true) extends Module {
         state := sWordOne
         // overwrite last bytes with timestamp / latency
         val is_lnic_data = Wire(Bool())
-        is_lnic_data := reg_eth_type === LNICConsts.IPV4_TYPE && reg_ip_proto === LNICConsts.LNIC_PROTO && reg_lnic_flags(0).asBool
+        is_lnic_data := reg_eth_type === LNICConsts.IPV4_TYPE && (reg_ip_proto === LNICConsts.NDP_PROTO || reg_ip_proto === LNICConsts.HOMA_PROTO) && reg_lnic_flags(0).asBool
         when (is_lnic_data) {
           val insert_timestamp = Wire(Bool())
           insert_timestamp:= to_nic.B && (reg_lnic_src === LNICConsts.TEST_CONTEXT_ID) 

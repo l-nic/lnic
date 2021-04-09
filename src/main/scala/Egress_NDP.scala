@@ -10,43 +10,27 @@ import freechips.rocketchip.rocket.NetworkHelpers._
 import freechips.rocketchip.rocket.LNICRocketConsts._
 import LNICConsts._
 
-class PISAEgressMetaIn extends Bundle {
-  // metadata for pkts coming from CPU
-  val dst_ip         = UInt(32.W)
-  val dst_context    = UInt(LNIC_CONTEXT_BITS.W)
-  val msg_len        = UInt(MSG_LEN_BITS.W)
-  val pkt_offset     = UInt(PKT_OFFSET_BITS.W)
-  val src_context    = UInt(LNIC_CONTEXT_BITS.W)
-  val tx_msg_id      = UInt(MSG_ID_BITS.W)
-  val buf_ptr        = UInt(BUF_PTR_BITS.W)
-  val buf_size_class = UInt(SIZE_CLASS_BITS.W)
-  val pull_offset    = UInt(CREDIT_BITS.W)
-  val genACK         = Bool()
-  val genNACK        = Bool()
-  val genPULL        = Bool()
-}
-
 /**
  * All IO for the LNIC PISA Egress module.
  */
-class LNICPISAEgressIO extends Bundle {
+class NDPEgressIO extends Bundle {
   val net_in = Flipped(Decoupled(new StreamChannel(NET_DP_BITS)))
-  val meta_in = Flipped(Valid(new PISAEgressMetaIn))
+  val meta_in = Flipped(Valid(new EgressMetaIn))
   val net_out = Decoupled(new StreamChannel(NET_DP_BITS))
-  val nic_mac_addr = Flipped(UInt(ETH_MAC_BITS.W))
-  val switch_mac_addr = Flipped(UInt(ETH_MAC_BITS.W))
-  val nic_ip_addr = Flipped(UInt(32.W))
+  val nic_mac_addr = Input(UInt(ETH_MAC_BITS.W))
+  val switch_mac_addr = Input(UInt(ETH_MAC_BITS.W))
+  val nic_ip_addr = Input(UInt(32.W))
 
-  override def cloneType = new LNICPISAEgressIO().asInstanceOf[this.type]
+  override def cloneType = new NDPEgressIO().asInstanceOf[this.type]
 }
 
 @chiselName
-class Egress(implicit p: Parameters) extends Module {
-  val io = IO(new LNICPISAEgressIO)
+class NDPEgress(implicit p: Parameters) extends Module {
+  val io = IO(new NDPEgressIO)
 
   // queues to store pkts and metadata that are arriving
-  val metaQueue_in = Wire(Decoupled(new PISAEgressMetaIn))
-  val metaQueue_out = Wire(Flipped(Decoupled(new PISAEgressMetaIn)))
+  val metaQueue_in = Wire(Decoupled(new EgressMetaIn))
+  val metaQueue_out = Wire(Flipped(Decoupled(new EgressMetaIn)))
   val pktQueue_out = Wire(Flipped(Decoupled(new StreamChannel(NET_DP_BITS))))
   metaQueue_in.valid := false.B // default
   metaQueue_in.bits := io.meta_in.bits
@@ -88,10 +72,10 @@ class Egress(implicit p: Parameters) extends Module {
   switch(deqState) {
     is (sWordOne) {
       when (pktQueue_out.valid && metaQueue_out.valid) {
-        val is_ctrl_pkt = metaQueue_out.bits.genACK || metaQueue_out.bits.genNACK || metaQueue_out.bits.genPULL
+        val is_data_pkt = (metaQueue_out.bits.flags & DATA_MASK > 0.U)
 
         // fill out headers
-        val headers = Wire(new Headers)
+        val headers = Wire(new NDPHeaders)
         // Ethernet Header
         headers.eth_dst  := io.switch_mac_addr
         headers.eth_src  := io.nic_mac_addr
@@ -102,9 +86,11 @@ class Egress(implicit p: Parameters) extends Module {
         headers.ip_ihl     := 5.U
         headers.ip_tos     := 0.U
         val ip_len = Wire(UInt(16.W))
-        when (is_ctrl_pkt) {
+        when (!is_data_pkt) {
+          // this is a control pkt
           ip_len   := IP_HDR_BYTES.U + LNIC_CTRL_PKT_BYTES.U
         } .otherwise {
+          // this is a data pkt
           val msg_len = metaQueue_out.bits.msg_len
           val num_pkts = MsgBufHelpers.compute_num_pkts(msg_len)
           val is_last_pkt = (metaQueue_out.bits.pkt_offset === (num_pkts - 1.U))
@@ -127,27 +113,22 @@ class Egress(implicit p: Parameters) extends Module {
         headers.ip_flags   := 0.U
         headers.ip_offset  := 0.U
         headers.ip_ttl     := 64.U
-        headers.ip_proto   := LNIC_PROTO
+        headers.ip_proto   := NDP_PROTO
         headers.ip_chksum  := 0.U // TODO(sibanez): implement this ..
         headers.ip_src     := io.nic_ip_addr
         headers.ip_dst     := metaQueue_out.bits.dst_ip
 
-        // LNIC Header
-        val ack_flag = Mux(metaQueue_out.bits.genACK, ACK_MASK, 0.U)
-        val nack_flag = Mux(metaQueue_out.bits.genNACK, NACK_MASK, 0.U)
-        val pull_flag = Mux(metaQueue_out.bits.genPULL, PULL_MASK, 0.U)
-        val data_flag = Mux(!is_ctrl_pkt, DATA_MASK, 0.U)
-
-        headers.lnic_flags          := ack_flag | nack_flag | pull_flag | data_flag
-        headers.lnic_src            := metaQueue_out.bits.src_context
-        headers.lnic_dst            := metaQueue_out.bits.dst_context
-        headers.lnic_msg_len        := metaQueue_out.bits.msg_len
-        headers.lnic_pkt_offset     := metaQueue_out.bits.pkt_offset
-        headers.lnic_pull_offset    := metaQueue_out.bits.pull_offset
-        headers.lnic_tx_msg_id      := metaQueue_out.bits.tx_msg_id
-        headers.lnic_buf_ptr        := metaQueue_out.bits.buf_ptr
-        headers.lnic_buf_size_class := metaQueue_out.bits.buf_size_class
-        headers.lnic_padding        := 0.U
+        // NDP Header
+        headers.ndp_flags          := metaQueue_out.bits.flags
+        headers.ndp_src            := metaQueue_out.bits.src_context
+        headers.ndp_dst            := metaQueue_out.bits.dst_context
+        headers.ndp_msg_len        := metaQueue_out.bits.msg_len
+        headers.ndp_pkt_offset     := metaQueue_out.bits.pkt_offset
+        headers.ndp_pull_offset    := metaQueue_out.bits.grant_offset
+        headers.ndp_tx_msg_id      := metaQueue_out.bits.tx_msg_id
+        headers.ndp_buf_ptr        := metaQueue_out.bits.buf_ptr
+        headers.ndp_buf_size_class := metaQueue_out.bits.buf_size_class
+        headers.ndp_padding        := 0.U
 
         io.net_out.valid := true.B
         io.net_out.bits.data := reverse_bytes(headers.asUInt, NET_DP_BYTES)

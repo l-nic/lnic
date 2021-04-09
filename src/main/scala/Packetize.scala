@@ -26,7 +26,7 @@ class PacketizeIO(implicit p: Parameters) extends Bundle {
 
   val net_in = Vec(num_cores, Flipped(Decoupled(new LNICTxMsgWord)))
   val net_out = Decoupled(new StreamChannel(NET_DP_BITS))
-  val meta_out = Valid(new PISAEgressMetaIn)
+  val meta_out = Valid(new EgressMetaIn)
   // Events
   val delivered = Flipped(Valid(new DeliveredEvent))
   val creditToBtx = Flipped(Valid(new CreditToBtxEvent))
@@ -35,7 +35,49 @@ class PacketizeIO(implicit p: Parameters) extends Bundle {
   val cancel = Valid(new CancelEvent)
   val timeout = Flipped(Valid(new TimeoutEvent))
   val timeout_cycles = Input(UInt(TIMER_BITS.W))
-  val rtt_pkts = Input(UInt(CREDIT_BITS.W))}
+  val rtt_pkts = Input(UInt(CREDIT_BITS.W))
+}
+
+class EgressMetaIn extends Bundle {
+  // metadata for pkts coming from CPU
+  val dst_ip         = UInt(32.W)
+  val dst_context    = UInt(LNIC_CONTEXT_BITS.W)
+  val msg_len        = UInt(MSG_LEN_BITS.W)
+  val pkt_offset     = UInt(PKT_OFFSET_BITS.W)
+  val src_context    = UInt(LNIC_CONTEXT_BITS.W)
+  val tx_msg_id      = UInt(MSG_ID_BITS.W)
+  val buf_ptr        = UInt(BUF_PTR_BITS.W)
+  val buf_size_class = UInt(SIZE_CLASS_BITS.W)
+  val grant_offset   = UInt(CREDIT_BITS.W)
+  val grant_prio     = UInt(HOMA_PRIO_BITS.W)
+  val flags          = UInt(8.W)
+  val is_new_msg     = Bool()
+  val is_rtx         = Bool()
+}
+
+class DeliveredEvent extends Bundle {
+  val tx_msg_id = UInt(MSG_ID_BITS.W)
+  val pkt_offset = UInt(PKT_OFFSET_BITS.W)
+  val msg_len = UInt(MSG_LEN_BITS.W)
+  val buf_ptr = UInt(BUF_PTR_BITS.W)
+  val buf_size_class = UInt(SIZE_CLASS_BITS.W)
+}
+
+class CreditToBtxEvent extends Bundle {
+  val tx_msg_id = UInt(MSG_ID_BITS.W)
+  val rtx = Bool()
+  val rtx_pkt_offset = UInt(PKT_OFFSET_BITS.W)
+  val update_credit = Bool()
+  val new_credit = UInt(CREDIT_BITS.W)
+  // Additional fields for generating pkts
+  // NOTE: these could be stored in tables indexed by tx_msg_id, but this would require extra state ...
+  val buf_ptr = UInt(BUF_PTR_BITS.W)
+  val buf_size_class = UInt(SIZE_CLASS_BITS.W)
+  val dst_ip = UInt(32.W)
+  val dst_context = UInt(LNIC_CONTEXT_BITS.W)
+  val msg_len = UInt(MSG_LEN_BITS.W)
+  val src_context = UInt(LNIC_CONTEXT_BITS.W)
+}
 
 class TxMsgDescriptor extends Bundle {
   val tx_msg_id   = UInt(MSG_ID_BITS.W)
@@ -49,6 +91,8 @@ class TxMsgDescriptor extends Bundle {
 class TxPktDescriptor extends Bundle {
   val msg_desc    = new TxMsgDescriptor  
   val tx_pkts     = UInt(MAX_SEGS_PER_MSG.W)
+  val is_new_msg  = Bool() // set for the first pkt of a msg
+  val is_rtx      = Bool() // set for retransmitted pkts
 }
 
 /* State maintained per-context on enqueue */
@@ -58,6 +102,11 @@ class ContextEnqState extends Bundle {
   val rem_bytes  = UInt(MSG_LEN_BITS.W)
   val pkt_bytes  = UInt(16.W)
   val word_count = UInt(16.W)
+}
+
+class DeliveredTableEntry extends Bundle {
+  val valid = Bool() 
+  val pkts = UInt(MAX_SEGS_PER_MSG.W)
 }
 
 @chiselName
@@ -83,7 +132,10 @@ class LNICPacketize(implicit p: Parameters) extends Module {
 
   /* State required for transport support */
   // table mapping {tx_msg_id => delivered_bitmap}
-  val delivered_table = SyncReadMem(NUM_MSG_BUFFERS, UInt(MAX_SEGS_PER_MSG.W))
+  // TODO(sibanez): add valid bit to each entry of delivered_table, then only
+  //   free msg state when the entry is valid. This is prevent the problem
+  //   when multiple ACKs from retransmissions cause msg state to be freed multiple times.
+  val delivered_table = SyncReadMem(NUM_MSG_BUFFERS, new DeliveredTableEntry)
   // table mapping {tx_msg_id => credit}
   val credit_table = Module(new TrueDualPortRAM(CREDIT_BITS, NUM_MSG_BUFFERS))
   credit_table.io.clock := clock
@@ -253,7 +305,10 @@ class LNICPacketize(implicit p: Parameters) extends Module {
         ctx_state.word_count := 0.U // counts the number of words written by CPU for this msg (not including app hdr)
         val num_pkts = MsgBufHelpers.compute_num_pkts(tx_app_hdr.msg_len)
         // initialize state that is indexed by tx_msg_id (for transport support)
-        delivered_table(tx_msg_id) := 0.U 
+        val delivered_entry = Wire(new DeliveredTableEntry)
+        delivered_entry.valid := true.B
+        delivered_entry.pkts := 0.U
+        delivered_table(tx_msg_id) := delivered_entry
         credit_table.io.portA.we := true.B
         credit_table.io.portA.din := io.rtt_pkts
         toBtx_table.io.portA.we := true.B
@@ -288,6 +343,8 @@ class LNICPacketize(implicit p: Parameters) extends Module {
         val tx_pkt_desc = Wire(new TxPktDescriptor)
         tx_pkt_desc.msg_desc := ctx_state.msg_desc
         tx_pkt_desc.tx_pkts := 1.U << ctx_state.pkt_offset
+        tx_pkt_desc.is_new_msg := true.B
+        tx_pkt_desc.is_rtx := false.B
 
         val is_last_word = ctx_state.rem_bytes <= XBYTES.U
         val is_full_pkt = ctx_state.pkt_bytes + XBYTES.U === MAX_SEG_LEN_BYTES.U
@@ -401,10 +458,11 @@ class LNICPacketize(implicit p: Parameters) extends Module {
   io.meta_out.bits.tx_msg_id      := active_tx_desc_reg.msg_desc.tx_msg_id
   io.meta_out.bits.buf_ptr        := active_tx_desc_reg.msg_desc.buf_ptr
   io.meta_out.bits.buf_size_class := active_tx_desc_reg.msg_desc.size_class
-  io.meta_out.bits.pull_offset    := 0.U
-  io.meta_out.bits.genACK         := false.B
-  io.meta_out.bits.genNACK        := false.B
-  io.meta_out.bits.genPULL        := false.B
+  io.meta_out.bits.grant_offset   := 0.U
+  io.meta_out.bits.grant_prio     := 0.U
+  io.meta_out.bits.flags          := DATA_MASK
+  io.meta_out.bits.is_new_msg     := active_tx_desc_reg.is_new_msg
+  io.meta_out.bits.is_rtx         := active_tx_desc_reg.is_rtx
 
   switch (deqState) {
     is (sWaitTxPkts) {
@@ -549,37 +607,41 @@ class LNICPacketize(implicit p: Parameters) extends Module {
     }
     is (sWriteDelivered) {
       // get read result
-      val delivered_bitmap = Wire(UInt(MAX_SEGS_PER_MSG.W))
-      delivered_bitmap := update_delivered_table_port
+      val delivered_entry = Wire(new DeliveredTableEntry)
+      delivered_entry := update_delivered_table_port
 
-      // compute updated bitmap
-      val new_delivered_bitmap = Wire(UInt(MAX_SEGS_PER_MSG.W))
-      new_delivered_bitmap := delivered_bitmap | (1.U << delivered_reg_1.bits.pkt_offset)
-      delivered_ptr := delivered_reg_1.bits.tx_msg_id
-      update_delivered_table_port := new_delivered_bitmap
+      when (delivered_entry.valid) {
+        // compute updated bitmap
+        val new_delivered_entry = Wire(new DeliveredTableEntry)
+        new_delivered_entry.valid := delivered_entry.valid // default
+        new_delivered_entry.pkts := delivered_entry.pkts | (1.U << delivered_reg_1.bits.pkt_offset)
 
-      // check if all pkts have been delivered
-      val num_pkts = MsgBufHelpers.compute_num_pkts(delivered_reg_1.bits.msg_len)
-      val all_pkts = Wire(UInt(MAX_SEGS_PER_MSG.W))
-      all_pkts := (1.U << num_pkts) - 1.U
-      when (new_delivered_bitmap === all_pkts) {
-        // TODO(sibanez): if multiple ACKs arrive as a result of multiple DATA pkt retransmissions
-        //   then these values will be freed multiple times. This means we should set the retransmission
-        //   timeout sufficiently high to ensure that pkts are only retransmitted when there was
-        //   definitely a dropped pkt. Should really add a tx_msg_id_table that keeps track of 
-        //   whether or not a particular tx_msg_id is allocated ... is it worth doing this now?
-        // free tx_msg_id
-        assert(tx_msg_id_freelist.io.enq.ready, "tx_msg_id_freelist is full when trying to free a tx_msg_id!")
-        tx_msg_id_freelist.io.enq.valid := true.B
-        tx_msg_id_freelist.io.enq.bits := delivered_reg_1.bits.tx_msg_id
-        // free msg buffer
-        val buffer_freelist = size_class_freelists_io(delivered_reg_1.bits.buf_size_class)
-        assert(buffer_freelist.enq.ready, "buffer freelist is full when trying to free a msg buffer!")
-        buffer_freelist.enq.valid := true.B
-        buffer_freelist.enq.bits := delivered_reg_1.bits.buf_ptr
-        // fire cancel timer event
-        io.cancel.valid := true.B
-        io.cancel.bits.msg_id := delivered_reg_1.bits.tx_msg_id
+        // check if all pkts have been delivered
+        val num_pkts = MsgBufHelpers.compute_num_pkts(delivered_reg_1.bits.msg_len)
+        val all_pkts = Wire(UInt(MAX_SEGS_PER_MSG.W))
+        all_pkts := (1.U << num_pkts) - 1.U
+        when (new_delivered_entry.pkts === all_pkts) {
+          // mark the delivered table entry as invalid so the msg state is not freed again
+          // as a result of multiple ACKs caused by retransmissions when no DATA pkts were lost.
+          new_delivered_entry.valid := false.B
+
+          // free tx_msg_id
+          assert(tx_msg_id_freelist.io.enq.ready, "tx_msg_id_freelist is full when trying to free a tx_msg_id!")
+          tx_msg_id_freelist.io.enq.valid := true.B
+          tx_msg_id_freelist.io.enq.bits := delivered_reg_1.bits.tx_msg_id
+          // free msg buffer
+          val buffer_freelist = size_class_freelists_io(delivered_reg_1.bits.buf_size_class)
+          assert(buffer_freelist.enq.ready, "buffer freelist is full when trying to free a msg buffer!")
+          buffer_freelist.enq.valid := true.B
+          buffer_freelist.enq.bits := delivered_reg_1.bits.buf_ptr
+          // fire cancel timer event
+          io.cancel.valid := true.B
+          io.cancel.bits.msg_id := delivered_reg_1.bits.tx_msg_id
+        }
+
+        // Update delivered_table
+        delivered_ptr := delivered_reg_1.bits.tx_msg_id
+        update_delivered_table_port := new_delivered_entry
       }
 
       // state transition
@@ -650,7 +712,9 @@ class LNICPacketize(implicit p: Parameters) extends Module {
           tx_pkt_desc.msg_desc.tx_app_hdr.dst_context := creditToBtx_reg_1.bits.dst_context
           tx_pkt_desc.msg_desc.tx_app_hdr.msg_len     := creditToBtx_reg_1.bits.msg_len
           tx_pkt_desc.msg_desc.src_context            := creditToBtx_reg_1.bits.src_context
-          tx_pkt_desc.tx_pkts                := credit_tx_pkts
+          tx_pkt_desc.tx_pkts                         := credit_tx_pkts
+          tx_pkt_desc.is_new_msg                      := false.B
+          tx_pkt_desc.is_rtx                          := creditToBtx_reg_1.bits.rtx
           // TODO(sibanez): this is not really a bug, it can legit happen, how to handle?
           assert(credit_scheduled_pkts_enq.ready, "scheduled_pkts queue is full while scheduling a packet!")
           credit_scheduled_pkts_enq.valid := true.B
@@ -715,20 +779,22 @@ class LNICPacketize(implicit p: Parameters) extends Module {
     }
     is (sSchedRtx) {
       // get read results
-      val delivered_bitmap = Wire(UInt(MAX_SEGS_PER_MSG.W))
-      delivered_bitmap := timeout_delivered_table_port
+      val delivered_entry = Wire(new DeliveredTableEntry)
+      delivered_entry := timeout_delivered_table_port
       val max_tx_pkt_offset = Wire(UInt(PKT_OFFSET_BITS.W))
       max_tx_pkt_offset := max_tx_pkt_offset_port
 
       // find any pkts to retransmit
       val rtx_pkts_mask = Wire(UInt(MAX_SEGS_PER_MSG.W))
       rtx_pkts_mask := (1.U << (timeout_reg_1.bits.metadata.rtx_offset + 1.U)) - 1.U
-      val rtx_pkts = ~delivered_bitmap & rtx_pkts_mask
-      when (rtx_pkts > 0.U && !reset.toBool) {
+      val rtx_pkts = ~delivered_entry.pkts & rtx_pkts_mask
+      when (delivered_entry.valid && rtx_pkts > 0.U && !reset.toBool) {
         // there are pkts to retransmit
         val tx_pkt_desc = Wire(new TxPktDescriptor)
-        tx_pkt_desc.msg_desc := timeout_reg_1.bits.metadata.msg_desc
-        tx_pkt_desc.tx_pkts := rtx_pkts
+        tx_pkt_desc.msg_desc   := timeout_reg_1.bits.metadata.msg_desc
+        tx_pkt_desc.tx_pkts    := rtx_pkts
+        tx_pkt_desc.is_new_msg := false.B
+        tx_pkt_desc.is_rtx     := true.B
         assert(timeout_scheduled_pkts_enq.ready, "schedule_pkts queue is full when processing timeout event!")
         timeout_scheduled_pkts_enq.valid := true.B
         timeout_scheduled_pkts_enq.bits := tx_pkt_desc

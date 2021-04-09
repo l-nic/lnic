@@ -10,24 +10,24 @@ import LNICConsts._
 /* LNIC PktGen:
  * Receive CtrlPktEvents and generate control pkts to be processed by the egress pipe
  */
-class LNICPktGenIO extends Bundle {
-  val ctrlPkt = Flipped(Valid(new PISAEgressMetaIn))
+class NDPPktGenIO extends Bundle {
+  val ctrlPkt = Flipped(Valid(new EgressMetaIn))
   val net_out = Decoupled(new StreamChannel(NET_DP_BITS))
-  val meta_out = Valid(new PISAEgressMetaIn)
+  val meta_out = Valid(new EgressMetaIn)
 }
 
 @chiselName
-class LNICPktGen(implicit p: Parameters) extends Module {
-  val io = IO(new LNICPktGenIO)
+class NDPPktGen(implicit p: Parameters) extends Module {
+  val io = IO(new NDPPktGenIO)
 
   // Queue to store metadata for scheduled pkts
-  val scheduled_meta_enq = Wire(Decoupled(new PISAEgressMetaIn))
-  val scheduled_meta_deq = Wire(Flipped(Decoupled(new PISAEgressMetaIn)))
+  val scheduled_meta_enq = Wire(Decoupled(new EgressMetaIn))
+  val scheduled_meta_deq = Wire(Flipped(Decoupled(new EgressMetaIn)))
   scheduled_meta_deq <> Queue(scheduled_meta_enq, SCHEDULED_PKTS_Q_DEPTH)
 
   // Queue to store metadata for paced PULL pkts 
-  val paced_meta_enq = Wire(Decoupled(new PISAEgressMetaIn))
-  val paced_meta_deq = Wire(Flipped(Decoupled(new PISAEgressMetaIn)))
+  val paced_meta_enq = Wire(Decoupled(new EgressMetaIn))
+  val paced_meta_deq = Wire(Flipped(Decoupled(new EgressMetaIn)))
   paced_meta_deq <> Queue(paced_meta_enq, PACED_PKTS_Q_DEPTH)
 
   // defaults
@@ -52,10 +52,17 @@ class LNICPktGen(implicit p: Parameters) extends Module {
   // pipeline reg
   val ctrlPkt_reg = RegNext(io.ctrlPkt)
 
-  when (ctrlPkt_reg.valid && !reset.toBool) {
-    assert(ctrlPkt_reg.bits.genACK || ctrlPkt_reg.bits.genNACK, "Violated assumption that ACK or NACK is always generated!")
+  val genACK = Wire(Bool())
+  val genNACK = Wire(Bool())
+  val genPULL = Wire(Bool())
+  genACK := (ctrlPkt_reg.bits.flags & ACK_MASK > 0.U)
+  genNACK := (ctrlPkt_reg.bits.flags & NACK_MASK > 0.U)
+  genPULL := (ctrlPkt_reg.bits.flags & PULL_MASK > 0.U)
 
-    when (ctrlPkt_reg.bits.genPULL) {
+  when (ctrlPkt_reg.valid && !reset.toBool) {
+    assert(genACK || genNACK, "Violated assumption that ACK or NACK is always generated!")
+
+    when (genPULL) {
       // must check for token availability when generating a PULL
       when (stateTokens === sAvailable) {
         // combine ctrl pkts and schedule immediately
@@ -66,13 +73,12 @@ class LNICPktGen(implicit p: Parameters) extends Module {
         //   is not empty when this event fires. Is that a problem?
       } .otherwise {
         // separate out the ACK/NACK from PULL
-        val ack_nack_pkt = Wire(new PISAEgressMetaIn)
+        val ack_nack_pkt = Wire(new EgressMetaIn)
         ack_nack_pkt := ctrlPkt_reg.bits
-        ack_nack_pkt.genPULL := false.B
-        val pull_pkt = Wire(new PISAEgressMetaIn)
+        ack_nack_pkt.flags := ctrlPkt_reg.bits.flags ^ PULL_MASK // clear the PULL bit
+        val pull_pkt = Wire(new EgressMetaIn)
         pull_pkt := ctrlPkt_reg.bits
-        pull_pkt.genACK := false.B
-        pull_pkt.genNACK := false.B
+        pull_pkt.flags := PULL_MASK
         // schedule the ACK/NACK immediately and pace the PULL
         schedule_pkt(ack_nack_pkt)
         pace_pkt(pull_pkt)
@@ -112,13 +118,13 @@ class LNICPktGen(implicit p: Parameters) extends Module {
     }
   }
 
-  def schedule_pkt(meta: PISAEgressMetaIn) = {
+  def schedule_pkt(meta: EgressMetaIn) = {
       assert (scheduled_meta_enq.ready, "scheduled_meta queue is full during enqueue!")
       scheduled_meta_enq.valid := true.B
       scheduled_meta_enq.bits := meta
   }
 
-  def pace_pkt(meta: PISAEgressMetaIn) = {
+  def pace_pkt(meta: EgressMetaIn) = {
       assert (paced_meta_enq.ready, "paced_meta queue is full during enqueue!")
       paced_meta_enq.valid := true.B
       paced_meta_enq.bits := meta
