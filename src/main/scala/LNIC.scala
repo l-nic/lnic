@@ -226,15 +226,14 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
     require(false, "Unsupported LNIC transport: " + transport)
   }
 
-  val pisa_ingress = if (transport == "NDP")  Some(Module(new NDPIngress))
-                else if (transport == "Homa") Some(Module(new HomaIngress))
-                else None
-  val pisa_egress  = if (transport == "NDP")  Some(Module(new NDPEgress))
-                else if (transport == "Homa") Some(Module(new HomaEgress))
-                else None
-  val pkt_gen      = if (transport == "NDP")  Some(Module(new NDPPktGen))
-                else if (transport == "Homa") Some(Module(new HomaPktGen))
-                else None
+  val ndp_ingress  = if (transport == "NDP")  Some(Module(new NDPIngress)) else None
+  val homa_ingress = if (transport == "Homa") Some(Module(new HomaIngress)) else None
+
+  val ndp_egress  = if (transport == "NDP")  Some(Module(new NDPEgress)) else None
+  val homa_egress = if (transport == "Homa") Some(Module(new HomaEgress)) else None
+
+  val ndp_pkt_gen  = if (transport == "NDP")  Some(Module(new NDPPktGen)) else None
+  val homa_pkt_gen = if (transport == "Homa") Some(Module(new HomaPktGen)) else None
 
   // NDP externs
   val credit_reg = if (transport == "NDP") Some(Module(new IfElseRaw)) else None
@@ -257,34 +256,40 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
   ////////////////////////////////
   /* Event / Extern Connections */
   ////////////////////////////////
-  assemble.io.get_rx_msg_info <> pisa_ingress.get.io.get_rx_msg_info
-  packetize.io.delivered := pisa_ingress.get.io.delivered
-  packetize.io.creditToBtx := pisa_ingress.get.io.creditToBtx
-  pisa_ingress.get.io.rtt_pkts := io.net.rtt_pkts
+  if (transport == "NDP") {
+    assemble.io.get_rx_msg_info <> ndp_ingress.get.io.get_rx_msg_info
+    packetize.io.delivered := ndp_ingress.get.io.delivered
+    packetize.io.creditToBtx := ndp_ingress.get.io.creditToBtx
+    ndp_ingress.get.io.rtt_pkts := io.net.rtt_pkts
+    ndp_egress.get.io.nic_mac_addr := io.net.nic_mac_addr
+    ndp_egress.get.io.switch_mac_addr := io.net.switch_mac_addr
+    ndp_egress.get.io.nic_ip_addr := io.net.nic_ip_addr
+    credit_reg.get.io <> ndp_ingress.get.io.creditReg
+    ndp_pkt_gen.get.io.ctrlPkt := ndp_ingress.get.io.ctrlPkt
+  } else if (transport == "Homa") {
+    assemble.io.get_rx_msg_info <> homa_ingress.get.io.get_rx_msg_info
+    packetize.io.delivered := homa_ingress.get.io.delivered
+    packetize.io.creditToBtx := homa_ingress.get.io.creditToBtx
+    homa_ingress.get.io.rtt_pkts := io.net.rtt_pkts
+    homa_egress.get.io.rtt_pkts := io.net.rtt_pkts
+    homa_egress.get.io.nic_mac_addr := io.net.nic_mac_addr
+    homa_egress.get.io.switch_mac_addr := io.net.switch_mac_addr
+    homa_egress.get.io.nic_ip_addr := io.net.nic_ip_addr
+    homa_pkt_gen.get.io.ackPkt   := homa_ingress.get.io.ackPkt
+    homa_pkt_gen.get.io.grantPkt := homa_ingress.get.io.grantPkt
+    pending_msg_reg.get.io <> homa_ingress.get.io.pendingMsgReg
+    grant_scheduler.get.io <> homa_ingress.get.io.grantScheduler
+    // Wire up tx_msg_prio_reg to ingress and egress pipelines
+    tx_msg_prio_reg.get.io.ingress_req := homa_ingress.get.io.txMsgPrioReg_req
+    tx_msg_prio_reg.get.io.egress_req := homa_egress.get.io.txMsgPrioReg_req
+    homa_egress.get.io.txMsgPrioReg_resp := tx_msg_prio_reg.get.io.egress_resp
+  }
   msg_timers.io.schedule := packetize.io.schedule
   msg_timers.io.reschedule := packetize.io.reschedule
   msg_timers.io.cancel := packetize.io.cancel
   packetize.io.timeout := msg_timers.io.timeout
   packetize.io.timeout_cycles := io.net.timeout_cycles
   packetize.io.rtt_pkts := io.net.rtt_pkts
-  pisa_egress.get.io.nic_mac_addr := io.net.nic_mac_addr
-  pisa_egress.get.io.switch_mac_addr := io.net.switch_mac_addr
-  pisa_egress.get.io.nic_ip_addr := io.net.nic_ip_addr
-  if (transport == "NDP") {
-    credit_reg.get.io <> pisa_ingress.get.io.creditReg
-    pkt_gen.get.io.ctrlPkt := pisa_ingress.get.io.ctrlPkt
-  } else if (transport == "Homa") {
-    pisa_egress.get.io.rtt_pkts := io.net.rtt_pkts
-    pkt_gen.get.io.ackPkt   := pisa_ingress.get.io.ackPkt
-    pkt_gen.get.io.grantPkt := pisa_ingress.get.io.grantPkt
-    pending_msg_reg.get.io <> pisa_ingress.get.io.pendingMsgReg
-    grant_scheduler.get.io <> pisa_ingress.get.io.grantScheduler
-    // Wire up tx_msg_prio_reg to ingress and egress pipelines
-    tx_msg_prio_reg.get.io.ingress_req := pisa_ingress.get.io.txMsgPrioReg_req
-    tx_msg_prio_reg.get.io.egress_req := pisa_egress.get.io.txMsgPrioReg_req
-    pisa_egress.get.io.txMsgPrioReg_resp := tx_msg_prio_reg.get.io.egress_resp
-  }
-
 
   //////////////////////////
   /* Datapath Connections */
@@ -294,11 +299,17 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
   net_in_queue_deq <> Queue(io.net.in, LNICConsts.MTU_BYTES/LNICConsts.NET_IF_BYTES * 2)
 
   // 64-bit => 512-bit
-  StreamWidthAdapter(pisa_ingress.get.io.net_in,
-                     net_in_queue_deq)
-
-  assemble.io.net_in <> pisa_ingress.get.io.net_out
-  assemble.io.meta_in := pisa_ingress.get.io.meta_out
+  if (transport == "NDP") {
+    StreamWidthAdapter(ndp_ingress.get.io.net_in,
+                       net_in_queue_deq)
+    assemble.io.net_in <> ndp_ingress.get.io.net_out
+    assemble.io.meta_in := ndp_ingress.get.io.meta_out
+  } else if (transport == "Homa") {
+    StreamWidthAdapter(homa_ingress.get.io.net_in,
+                       net_in_queue_deq)
+    assemble.io.net_in <> homa_ingress.get.io.net_out
+    assemble.io.meta_in := homa_ingress.get.io.meta_out
+  }
 
   rx_queues.io.net_in <> assemble.io.net_out
   rx_queues.io.meta_in := assemble.io.meta_out 
@@ -317,15 +328,23 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
   arbiter.io.data_in <> packetize.io.net_out
   arbiter.io.data_meta_in := packetize.io.meta_out
 
-  arbiter.io.ctrl_in <> pkt_gen.get.io.net_out
-  arbiter.io.ctrl_meta_in := pkt_gen.get.io.meta_out
-
-  pisa_egress.get.io.net_in <> arbiter.io.net_out
-  pisa_egress.get.io.meta_in := arbiter.io.meta_out
-
-  // 512-bit => 64-bit
-  StreamWidthAdapter(io.net.out,
-                     pisa_egress.get.io.net_out)
+  if (transport == "NDP") {
+    arbiter.io.ctrl_in <> ndp_pkt_gen.get.io.net_out
+    arbiter.io.ctrl_meta_in := ndp_pkt_gen.get.io.meta_out
+    ndp_egress.get.io.net_in <> arbiter.io.net_out
+    ndp_egress.get.io.meta_in := arbiter.io.meta_out
+    // 512-bit => 64-bit
+    StreamWidthAdapter(io.net.out,
+                       ndp_egress.get.io.net_out)
+  } else if (transport == "Homa") {
+    arbiter.io.ctrl_in <> homa_pkt_gen.get.io.net_out
+    arbiter.io.ctrl_meta_in := homa_pkt_gen.get.io.meta_out
+    homa_egress.get.io.net_in <> arbiter.io.net_out
+    homa_egress.get.io.meta_in := arbiter.io.meta_out
+    // 512-bit => 64-bit
+    StreamWidthAdapter(io.net.out,
+                       homa_egress.get.io.net_out)
+  }
 
 }
 
