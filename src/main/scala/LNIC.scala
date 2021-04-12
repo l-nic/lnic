@@ -26,8 +26,8 @@ object LNICConsts {
   def NET_CPU_FULL_KEEP = ~0.U(XBYTES.W)
 
   val IPV4_TYPE = "h0800".U(16.W)
-  val NDP_PROTO  = "h99".U(8.W)
-  val HOMA_PROTO = "h98".U(8.W)
+  val NDP_PROTO  = 155.U(8.W)
+  val HOMA_PROTO = 154.U(8.W)
 
   val DATA_MASK  = "b00000001".U(8.W)
   val ACK_MASK   = "b00000010".U(8.W)
