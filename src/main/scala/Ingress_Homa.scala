@@ -21,6 +21,7 @@ class HomaIngressIO extends Bundle {
   val delivered = Valid(new DeliveredEvent)
   val creditToBtx = Valid(new CreditToBtxEvent)
   val ackPkt = Valid(new EgressMetaIn)
+  val nackPkt = Valid(new EgressMetaIn)
   val grantPkt = Valid(new EgressMetaIn)
   val pendingMsgReg = new PendingMsgRegIO
   val grantScheduler = new GrantSchedulerIO
@@ -66,11 +67,14 @@ class HomaHeaders extends Bundle {
 class HomaPipeMeta extends Bundle {
   val drop = Bool()
   val is_data = Bool()
+  val is_chopped = Bool()
   val buf_ptr = UInt(BUF_PTR_BITS.W)
   val buf_size_class = UInt(SIZE_CLASS_BITS.W)
   val grant_offset = UInt(CREDIT_BITS.W)
   val grant_prio = UInt(HOMA_PRIO_BITS.W)
   val genGRANT = Bool()
+  val genACK = Bool()
+  val ackNo = UInt((PKT_OFFSET_BITS + 1).W)
   val cur_msg_expect_resp = Bool()
   val grant_sched_expect_resp = Bool()
   val msg_len_pkts = UInt(log2Up(MAX_SEGS_PER_MSG).W)
@@ -109,6 +113,7 @@ class HomaIngress(implicit p: Parameters) extends Module {
   io.delivered.valid := false.B
   io.creditToBtx.valid := false.B
   io.ackPkt.valid := false.B
+  io.nackPkt.valid := false.B
   io.grantPkt.valid := false.B
 
   io.pendingMsgReg.cur_msg_req.valid := false.B
@@ -201,11 +206,14 @@ class HomaIngress(implicit p: Parameters) extends Module {
     rx_info_stage1.bits.ingress_meta.is_last_pkt := false.B // default
     rx_info_stage1.bits.pipe_meta.drop           := false.B // default
     rx_info_stage1.bits.pipe_meta.is_data        := false.B // default
+    rx_info_stage1.bits.pipe_meta.is_chopped     := false.B // default
     rx_info_stage1.bits.pipe_meta.buf_ptr        := headers_reg.bits.homa_buf_ptr
     rx_info_stage1.bits.pipe_meta.buf_size_class := headers_reg.bits.homa_buf_size_class
     rx_info_stage1.bits.pipe_meta.grant_offset   := 0.U // default
     rx_info_stage1.bits.pipe_meta.grant_prio     := 0.U // default
     rx_info_stage1.bits.pipe_meta.genGRANT       := false.B // default
+    rx_info_stage1.bits.pipe_meta.genACK         := false.B // default
+    rx_info_stage1.bits.pipe_meta.ackNo          := 0.U // default
     rx_info_stage1.bits.pipe_meta.cur_msg_expect_resp     := false.B // default
     rx_info_stage1.bits.pipe_meta.grant_sched_expect_resp := false.B // default
     rx_info_stage1.bits.pipe_meta.msg_len_pkts   := MsgBufHelpers.compute_num_pkts(headers_reg.bits.homa_msg_len)
@@ -217,32 +225,19 @@ class HomaIngress(implicit p: Parameters) extends Module {
       // do not pass chopped pkts to the assembly module
       rx_info_stage1.bits.pipe_meta.drop := is_chopped
 
-      rx_info_stage1.bits.pipe_meta.is_data := !is_chopped
+      rx_info_stage1.bits.pipe_meta.is_data := true.B
+      rx_info_stage1.bits.pipe_meta.is_chopped := is_chopped
       // invoke get_rx_msg_info extern
-      // NOTE: CHOP'ed DATA pkts do not need to invoke this.
-      io.get_rx_msg_info.req.valid := !is_chopped
+      // NOTE: CHOP'ed DATA pkts need to invoke this to get the ackNo,
+      // but we don't want to mark CHOP'ed pkts are received cuz they
+      // don't contain any DATA.
+      io.get_rx_msg_info.req.valid := true.B
       io.get_rx_msg_info.req.bits.mark_received  := !is_chopped
       io.get_rx_msg_info.req.bits.src_ip         := headers_reg.bits.ip_src
       io.get_rx_msg_info.req.bits.src_context    := headers_reg.bits.homa_src
       io.get_rx_msg_info.req.bits.tx_msg_id      := headers_reg.bits.homa_tx_msg_id
       io.get_rx_msg_info.req.bits.msg_len        := headers_reg.bits.homa_msg_len
       io.get_rx_msg_info.req.bits.pkt_offset     := headers_reg.bits.homa_pkt_offset
-
-      // generate either an ACK or NACK
-      io.ackPkt.valid := true.B
-      io.ackPkt.bits.dst_ip         := headers_reg.bits.ip_src
-      io.ackPkt.bits.dst_context    := headers_reg.bits.homa_src
-      io.ackPkt.bits.msg_len        := headers_reg.bits.homa_msg_len
-      io.ackPkt.bits.pkt_offset     := headers_reg.bits.homa_pkt_offset
-      io.ackPkt.bits.src_context    := headers_reg.bits.homa_dst
-      io.ackPkt.bits.tx_msg_id      := headers_reg.bits.homa_tx_msg_id
-      io.ackPkt.bits.buf_ptr        := headers_reg.bits.homa_buf_ptr
-      io.ackPkt.bits.buf_size_class := headers_reg.bits.homa_buf_size_class
-      io.ackPkt.bits.grant_offset   := 0.U // unused for ACKs and NACKs
-      io.ackPkt.bits.grant_prio     := 0.U // unused for ACKs and NACKs
-      io.ackPkt.bits.flags          := Mux(is_chopped, NACK_MASK, ACK_MASK)
-      io.ackPkt.bits.is_new_msg     := false.B
-      io.ackPkt.bits.is_rtx         := false.B
 
     } .otherwise {
       // this is an ACK, NACK, or GRANT pkt
@@ -265,15 +260,23 @@ class HomaIngress(implicit p: Parameters) extends Module {
         io.txMsgPrioReg_req.bits.prio  := headers_reg.bits.homa_grant_prio
       }
 
-      when (is_ack) {
+      when (is_ack || is_nack || is_grant) {
+        // We'll use cumulative ACKs (i.e. mark all pkts up until the ackNo as received)
+        val delivered_pkts = Wire(UInt(MAX_SEGS_PER_MSG.W))
+        val ackNo = Wire(UInt((PKT_OFFSET_BITS + 1).W))
+        ackNo := Mux(is_nack, headers_reg.bits.homa_grant_offset, headers_reg.bits.homa_pkt_offset)
+        delivered_pkts := (1.U << ackNo) - 1.U
+
         // fire delivered event
         io.delivered.valid := true.B
         io.delivered.bits.tx_msg_id      := headers_reg.bits.homa_tx_msg_id
-        io.delivered.bits.pkt_offset     := headers_reg.bits.homa_pkt_offset
+        io.delivered.bits.delivered_pkts := delivered_pkts
         io.delivered.bits.msg_len        := headers_reg.bits.homa_msg_len
         io.delivered.bits.buf_ptr        := headers_reg.bits.homa_buf_ptr
         io.delivered.bits.buf_size_class := headers_reg.bits.homa_buf_size_class
-      } .elsewhen (is_nack || is_grant) {
+      }
+
+      when (is_nack || is_grant) {
         // fire creditToBtx event to either increase msg credit or invoke retransmission
         io.creditToBtx.valid := true.B
         io.creditToBtx.bits.tx_msg_id      := headers_reg.bits.homa_tx_msg_id
@@ -309,7 +312,9 @@ class HomaIngress(implicit p: Parameters) extends Module {
 
       // get_rx_msg_info extern indicates if this is the last pkt of the msg.
       // Need to pass this flag to the Assembly module so it can schedule the msg for delivery to the CPU.
-      cur_msg_stage1.bits.ingress_meta.is_last_pkt := io.get_rx_msg_info.resp.bits.is_last_pkt
+      val is_last_pkt = Wire(Bool())
+      is_last_pkt := io.get_rx_msg_info.resp.bits.is_last_pkt
+      cur_msg_stage1.bits.ingress_meta.is_last_pkt := is_last_pkt
 
       when (!io.get_rx_msg_info.resp.bits.fail) {
         // access state for current msg in pendingMsgRed 
@@ -331,6 +336,31 @@ class HomaIngress(implicit p: Parameters) extends Module {
         // Otherwise, update the msg state:
         //   - Increment grantableIdx, decrement remainingSize, update ackNo
         io.pendingMsgReg.cur_msg_req.bits.is_new_msg   := io.get_rx_msg_info.resp.bits.is_new_msg
+
+        // Be sure to send an ACK when receiving the last pkt of a msg
+        cur_msg_stage1.bits.pipe_meta.genACK := is_last_pkt
+        cur_msg_stage1.bits.pipe_meta.ackNo := io.get_rx_msg_info.resp.bits.ackNo
+      }
+
+      when (io.get_rx_msg_info.resp.bits.fail || rx_info_stage2.bits.pipe_meta.is_chopped) {
+        // generate a NACK for every CHOP'ed DATA pkt or if we fail to allocate a buffer for the msg
+        val ackNo = Wire(UInt())
+        ackNo := Mux(io.get_rx_msg_info.resp.bits.fail, 0.U, io.get_rx_msg_info.resp.bits.ackNo)
+
+        io.nackPkt.valid := true.B
+        io.nackPkt.bits.dst_ip         := rx_info_stage2.bits.ingress_meta.src_ip 
+        io.nackPkt.bits.dst_context    := rx_info_stage2.bits.ingress_meta.src_context
+        io.nackPkt.bits.msg_len        := rx_info_stage2.bits.ingress_meta.msg_len
+        io.nackPkt.bits.pkt_offset     := rx_info_stage2.bits.ingress_meta.pkt_offset
+        io.nackPkt.bits.src_context    := rx_info_stage2.bits.ingress_meta.dst_context
+        io.nackPkt.bits.tx_msg_id      := rx_info_stage2.bits.ingress_meta.tx_msg_id
+        io.nackPkt.bits.buf_ptr        := rx_info_stage2.bits.pipe_meta.buf_ptr
+        io.nackPkt.bits.buf_size_class := rx_info_stage2.bits.pipe_meta.buf_size_class
+        io.nackPkt.bits.grant_offset   := ackNo // used to ACK received DATA
+        io.nackPkt.bits.grant_prio     := 0.U // unused for NACKs
+        io.nackPkt.bits.flags          := NACK_MASK
+        io.nackPkt.bits.is_new_msg     := false.B
+        io.nackPkt.bits.is_rtx         := false.B
       }
 
     }
@@ -380,6 +410,9 @@ class HomaIngress(implicit p: Parameters) extends Module {
         io.pendingMsgReg.grant_msg_req.valid := true.B
         io.pendingMsgReg.grant_msg_req.bits.index := sched_resp.grant_msg_id
         io.pendingMsgReg.grant_msg_req.bits.grantedIdx := sched_resp.grant_offset
+      } .otherwise {
+        // generate ACK for the current msg, rather than a GRANT
+        grant_msg_stage1.bits.pipe_meta.genACK := true.B
       }
     }
   }
@@ -407,6 +440,24 @@ class HomaIngress(implicit p: Parameters) extends Module {
       io.grantPkt.bits.flags          := GRANT_MASK
       io.grantPkt.bits.is_new_msg     := false.B
       io.grantPkt.bits.is_rtx         := false.B
+    }
+
+    when (grant_msg_stage2.bits.pipe_meta.genACK) {
+      // Use current msg fields for ACK
+      io.ackPkt.valid := true.B
+      io.ackPkt.bits.dst_ip         := grant_msg_stage2.bits.ingress_meta.src_ip
+      io.ackPkt.bits.dst_context    := grant_msg_stage2.bits.ingress_meta.src_context
+      io.ackPkt.bits.msg_len        := grant_msg_stage2.bits.ingress_meta.msg_len
+      io.ackPkt.bits.pkt_offset     := grant_msg_stage2.bits.pipe_meta.ackNo
+      io.ackPkt.bits.src_context    := grant_msg_stage2.bits.ingress_meta.dst_context
+      io.ackPkt.bits.tx_msg_id      := grant_msg_stage2.bits.ingress_meta.tx_msg_id
+      io.ackPkt.bits.buf_ptr        := grant_msg_stage2.bits.pipe_meta.buf_ptr
+      io.ackPkt.bits.buf_size_class := grant_msg_stage2.bits.pipe_meta.buf_size_class
+      io.ackPkt.bits.grant_offset   := 0.U // unused for ACKs
+      io.ackPkt.bits.grant_prio     := 0.U // unused for ACKs
+      io.ackPkt.bits.flags          := ACK_MASK
+      io.ackPkt.bits.is_new_msg     := false.B
+      io.ackPkt.bits.is_rtx         := false.B
     }
   }
 

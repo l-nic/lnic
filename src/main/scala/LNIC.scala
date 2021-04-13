@@ -276,6 +276,7 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
     homa_egress.get.io.switch_mac_addr := io.net.switch_mac_addr
     homa_egress.get.io.nic_ip_addr := io.net.nic_ip_addr
     homa_pkt_gen.get.io.ackPkt   := homa_ingress.get.io.ackPkt
+    homa_pkt_gen.get.io.nackPkt   := homa_ingress.get.io.nackPkt
     homa_pkt_gen.get.io.grantPkt := homa_ingress.get.io.grantPkt
     pending_msg_reg.get.io <> homa_ingress.get.io.pendingMsgReg
     grant_scheduler.get.io <> homa_ingress.get.io.grantScheduler

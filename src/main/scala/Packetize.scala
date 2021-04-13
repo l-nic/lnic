@@ -57,7 +57,7 @@ class EgressMetaIn extends Bundle {
 
 class DeliveredEvent extends Bundle {
   val tx_msg_id = UInt(MSG_ID_BITS.W)
-  val pkt_offset = UInt(PKT_OFFSET_BITS.W)
+  val delivered_pkts = UInt(MAX_SEGS_PER_MSG.W)
   val msg_len = UInt(MSG_LEN_BITS.W)
   val buf_ptr = UInt(BUF_PTR_BITS.W)
   val buf_size_class = UInt(SIZE_CLASS_BITS.W)
@@ -614,7 +614,7 @@ class LNICPacketize(implicit p: Parameters) extends Module {
         // compute updated bitmap
         val new_delivered_entry = Wire(new DeliveredTableEntry)
         new_delivered_entry.valid := delivered_entry.valid // default
-        new_delivered_entry.pkts := delivered_entry.pkts | (1.U << delivered_reg_1.bits.pkt_offset)
+        new_delivered_entry.pkts := delivered_entry.pkts | delivered_reg_1.bits.delivered_pkts
 
         // check if all pkts have been delivered
         val num_pkts = MsgBufHelpers.compute_num_pkts(delivered_reg_1.bits.msg_len)

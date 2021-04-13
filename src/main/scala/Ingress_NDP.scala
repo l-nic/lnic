@@ -302,7 +302,7 @@ class NDPIngress(implicit p: Parameters) extends Module {
         // fire delivered event
         io.delivered.valid := true.B
         io.delivered.bits.tx_msg_id      := credit_stage2.bits.ingress_meta.tx_msg_id
-        io.delivered.bits.pkt_offset     := credit_stage2.bits.ingress_meta.pkt_offset
+        io.delivered.bits.delivered_pkts := (1.U << credit_stage2.bits.ingress_meta.pkt_offset)
         io.delivered.bits.msg_len        := credit_stage2.bits.ingress_meta.msg_len
         io.delivered.bits.buf_ptr        := credit_stage2.bits.pipe_meta.buf_ptr
         io.delivered.bits.buf_size_class := credit_stage2.bits.pipe_meta.buf_size_class
