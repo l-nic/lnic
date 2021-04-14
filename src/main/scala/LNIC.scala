@@ -51,7 +51,7 @@ object LNICConsts {
   /**** Homa Consts ****/
   val HOMA_PRIO_BITS = 8
   val HOMA_OVERCOMMITMENT_LEVEL = 3
-  val HOMA_NUM_UNSCHEDULED_PRIOS = 2
+  val HOMA_NUM_UNSCHEDULED_PRIOS = 1
   /*********************/
 
   // TODO(sibanez): maybe these should be parameters as well?
