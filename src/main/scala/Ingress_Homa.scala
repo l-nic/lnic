@@ -316,7 +316,7 @@ class HomaIngress(implicit p: Parameters) extends Module {
       is_last_pkt := io.get_rx_msg_info.resp.bits.is_last_pkt
       cur_msg_stage1.bits.ingress_meta.is_last_pkt := is_last_pkt
 
-      when (!io.get_rx_msg_info.resp.bits.fail) {
+      when (!io.get_rx_msg_info.resp.bits.fail && !rx_info_stage2.bits.pipe_meta.is_chopped) {
         // access state for current msg in pendingMsgRed 
         cur_msg_stage1.bits.pipe_meta.cur_msg_expect_resp := true.B
         io.pendingMsgReg.cur_msg_req.valid := true.B
