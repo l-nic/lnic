@@ -76,7 +76,9 @@ class GlobalRxQueues(implicit p: Parameters) extends Module {
 
   // divide the buffer space equally amongst contexts
   // NOTE: this may change in the future, but it's easy for now
-  val max_qsize = num_entries/num_contexts
+  // TODO(sibanez): I noticed that the freelist goes empty when the total word count hits num_entries - 1.
+  //   That's why I added the - 1 here. Should probably check why this is ...
+  val max_qsize = num_entries/num_contexts - 1
 
   // table mapping {context ID => core bitmap}
   val core_table = RegInit(VecInit(Seq.fill(num_contexts)(0.U(num_cores.W))))
