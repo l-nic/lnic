@@ -580,7 +580,7 @@ class GrantScheduler(implicit p: Parameters) extends Module {
   val grantable_msgs = VecInit(msg_state.map( msg => msg.valid && (msg.grantableIdx > msg.grantedIdx) ))
 
   // Compute the highest priority grantable msg
-  val candidate = msg_state.reduce( (msg1, msg2) => {
+  val candidate = msg_state.reduceTree( (msg1, msg2) => {
     val result_msg = Wire(new GrantMsgState)
 
     val msg1_is_grantable = grantable_msgs(msg1.rx_msg_id)
