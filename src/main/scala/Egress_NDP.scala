@@ -125,7 +125,7 @@ class NDPEgress(implicit p: Parameters) extends Module {
         headers.ndp_dst            := metaQueue_out.bits.dst_context
         headers.ndp_msg_len        := metaQueue_out.bits.msg_len
         headers.ndp_pkt_offset     := metaQueue_out.bits.pkt_offset
-        headers.ndp_pull_offset    := metaQueue_out.bits.grant_offset
+        headers.ndp_pull_offset    := metaQueue_out.bits.credit
         headers.ndp_tx_msg_id      := metaQueue_out.bits.tx_msg_id
         headers.ndp_buf_ptr        := metaQueue_out.bits.buf_ptr
         headers.ndp_buf_size_class := metaQueue_out.bits.buf_size_class

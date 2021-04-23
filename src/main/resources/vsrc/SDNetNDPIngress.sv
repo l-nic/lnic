@@ -2,9 +2,6 @@
 // *************************************************************************
 // SDNetNDPIngress.sv
 // *************************************************************************
-//`timescale 1ns/1ps
-
-// import sdnet_ndp_ingress_pkg::*;
 
 module SDNetNDPIngress #(
   parameter TDATA_W = 512
@@ -88,8 +85,8 @@ module SDNetNDPIngress #(
   output             [15:0] net_ctrlPkt_bits_tx_msg_id,
   output             [15:0] net_ctrlPkt_bits_buf_ptr,
   output              [7:0] net_ctrlPkt_bits_buf_size_class,
-  output             [15:0] net_ctrlPkt_bits_grant_offset,
-  output              [7:0] net_ctrlPkt_bits_grant_prio,
+  output             [15:0] net_ctrlPkt_bits_credit,
+  output              [7:0] net_ctrlPkt_bits_rank,
   output              [7:0] net_ctrlPkt_bits_flags,
   output                    net_ctrlPkt_bits_is_new_msg,
   output                    net_ctrlPkt_bits_is_rtx,
@@ -198,8 +195,8 @@ module SDNetNDPIngress #(
           net_ctrlPkt_bits_tx_msg_id,
           net_ctrlPkt_bits_buf_ptr,
           net_ctrlPkt_bits_buf_size_class,
-          net_ctrlPkt_bits_grant_offset,
-          net_ctrlPkt_bits_grant_prio,
+          net_ctrlPkt_bits_credit,
+          net_ctrlPkt_bits_rank,
           net_ctrlPkt_bits_flags,
           net_ctrlPkt_bits_is_new_msg,
           net_ctrlPkt_bits_is_rtx} = user_extern_out.ctrlPkt_event;

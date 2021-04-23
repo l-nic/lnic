@@ -220,32 +220,36 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
 
   if (transport == "NDP") {
     println("Building LNIC with NDP transport!")
-  } else if (transport == "Homa") {
-    println("Building LNIC with Homa transport!")
   } else if (transport == "P4-NDP") {
     println("Building LNIC with P4-NDP transport!")
+  } else if (transport == "Homa") {
+    println("Building LNIC with Homa transport!")
+  } else if (transport == "P4-Homa") {
+    println("Building LNIC with P4-Homa transport!")
   } else {
     require(false, "Unsupported LNIC transport: " + transport)
   }
 
-  val ndp_ingress    = if (transport == "NDP")  Some(Module(new NDPIngress)) else None
-  val p4_ndp_ingress = if (transport == "P4-NDP") Some(Module(new SDNetNDPIngress)) else None
-  val homa_ingress   = if (transport == "Homa") Some(Module(new HomaIngress)) else None
+  val ndp_ingress     = if (transport == "NDP")  Some(Module(new NDPIngress)) else None
+  val p4_ndp_ingress  = if (transport == "P4-NDP") Some(Module(new SDNetNDPIngress)) else None
+  val homa_ingress    = if (transport == "Homa") Some(Module(new HomaIngress)) else None
+  val p4_homa_ingress = if (transport == "P4-Homa") Some(Module(new SDNetHomaIngress)) else None
 
-  val ndp_egress    = if (transport == "NDP")  Some(Module(new NDPEgress)) else None
-  val p4_ndp_egress = if (transport == "P4-NDP") Some(Module(new SDNetNDPEgress)) else None
-  val homa_egress   = if (transport == "Homa") Some(Module(new HomaEgress)) else None
+  val ndp_egress     = if (transport == "NDP")  Some(Module(new NDPEgress)) else None
+  val p4_ndp_egress  = if (transport == "P4-NDP") Some(Module(new SDNetNDPEgress)) else None
+  val homa_egress    = if (transport == "Homa") Some(Module(new HomaEgress)) else None
+  val p4_homa_egress = if (transport == "P4-Homa") Some(Module(new SDNetHomaEgress)) else None
 
   val ndp_pkt_gen  = if (transport == "NDP" || transport == "P4-NDP")  Some(Module(new NDPPktGen)) else None
-  val homa_pkt_gen = if (transport == "Homa") Some(Module(new HomaPktGen)) else None
+  val homa_pkt_gen = if (transport == "Homa" || transport == "P4-Homa") Some(Module(new HomaPktGen)) else None
 
   // NDP externs
   val credit_reg = if (transport == "NDP" || transport == "P4-NDP") Some(Module(new IfElseRaw)) else None
 
   // Homa externs
-  val pending_msg_reg = if (transport == "Homa") Some(Module(new PendingMsgReg)) else None
-  val grant_scheduler = if (transport == "Homa") Some(Module(new GrantScheduler)) else None 
-  val tx_msg_prio_reg = if (transport == "Homa") Some(Module(new TxMsgPrioReg)) else None
+  val pending_msg_reg = if (transport == "Homa" || transport == "P4-Homa") Some(Module(new PendingMsgReg)) else None
+  val grant_scheduler = if (transport == "Homa" || transport == "P4-Homa") Some(Module(new GrantScheduler)) else None 
+  val tx_msg_prio_reg = if (transport == "Homa" || transport == "P4-Homa") Some(Module(new TxMsgPrioReg)) else None
 
   val lnic_reset_done = Wire(Bool())
   val lnic_reset_done_reg = RegNext(lnic_reset_done)
@@ -313,6 +317,31 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
     tx_msg_prio_reg.get.io.ingress_req   := homa_ingress.get.io.txMsgPrioReg_req
     tx_msg_prio_reg.get.io.egress_req    := homa_egress.get.io.txMsgPrioReg_req
     homa_egress.get.io.txMsgPrioReg_resp := tx_msg_prio_reg.get.io.egress_resp
+  } else if (transport == "P4-Homa") {
+    p4_homa_ingress.get.io.clock := clock
+    p4_homa_ingress.get.io.reset := reset
+    p4_homa_egress.get.io.clock := clock
+    p4_homa_egress.get.io.reset := reset
+    assemble.io.get_rx_msg_info          <> p4_homa_ingress.get.io.net.get_rx_msg_info
+    packetize.io.delivered               := p4_homa_ingress.get.io.net.delivered
+    packetize.io.creditToBtx             := p4_homa_ingress.get.io.net.creditToBtx
+    p4_homa_ingress.get.io.net.nic_mac_addr     := io.net.nic_mac_addr
+    p4_homa_ingress.get.io.net.switch_mac_addr  := io.net.switch_mac_addr
+    p4_homa_ingress.get.io.net.nic_ip_addr      := io.net.nic_ip_addr
+    p4_homa_ingress.get.io.net.rtt_pkts         := io.net.rtt_pkts
+    p4_homa_egress.get.io.net.nic_mac_addr      := io.net.nic_mac_addr
+    p4_homa_egress.get.io.net.switch_mac_addr   := io.net.switch_mac_addr
+    p4_homa_egress.get.io.net.nic_ip_addr       := io.net.nic_ip_addr
+    p4_homa_egress.get.io.net.rtt_pkts          := io.net.rtt_pkts
+    homa_pkt_gen.get.io.ackPkt           := p4_homa_ingress.get.io.net.ackPkt
+    homa_pkt_gen.get.io.nackPkt          := p4_homa_ingress.get.io.net.nackPkt
+    homa_pkt_gen.get.io.grantPkt         := p4_homa_ingress.get.io.net.grantPkt
+    pending_msg_reg.get.io               <> p4_homa_ingress.get.io.net.pendingMsgReg
+    grant_scheduler.get.io               <> p4_homa_ingress.get.io.net.grantScheduler
+    // Wire up tx_msg_prio_reg to ingress and egress pipelines
+    tx_msg_prio_reg.get.io.ingress_req   := p4_homa_ingress.get.io.net.txMsgPrioReg_req
+    tx_msg_prio_reg.get.io.egress_req    := p4_homa_egress.get.io.net.txMsgPrioReg_req
+    p4_homa_egress.get.io.net.txMsgPrioReg_resp := tx_msg_prio_reg.get.io.egress_resp
   }
   msg_timers.io.schedule := packetize.io.schedule
   msg_timers.io.reschedule := packetize.io.reschedule
@@ -344,6 +373,11 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
                        net_in_queue_deq)
     assemble.io.net_in <> homa_ingress.get.io.net_out
     assemble.io.meta_in := homa_ingress.get.io.meta_out
+  } else if (transport == "P4-Homa") {
+    StreamWidthAdapter(p4_homa_ingress.get.io.net.net_in,
+                       net_in_queue_deq)
+    assemble.io.net_in  <> p4_homa_ingress.get.io.net.net_out
+    assemble.io.meta_in := p4_homa_ingress.get.io.net.meta_out
   }
 
   rx_queues.io.net_in <> assemble.io.net_out
@@ -387,6 +421,14 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
     // 512-bit => 64-bit
     StreamWidthAdapter(io.net.out,
                        homa_egress.get.io.net_out)
+  } else if (transport == "P4-Homa") {
+    arbiter.io.ctrl_in <> homa_pkt_gen.get.io.net_out
+    arbiter.io.ctrl_meta_in := homa_pkt_gen.get.io.meta_out
+    p4_homa_egress.get.io.net.net_in <> arbiter.io.net_out
+    p4_homa_egress.get.io.net.meta_in := arbiter.io.meta_out
+    // 512-bit => 64-bit
+    StreamWidthAdapter(io.net.out,
+                       p4_homa_egress.get.io.net.net_out)
   }
 
 }

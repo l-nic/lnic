@@ -294,8 +294,8 @@ class NDPIngress(implicit p: Parameters) extends Module {
       io.ctrlPkt.bits.tx_msg_id      := credit_stage2.bits.ingress_meta.tx_msg_id
       io.ctrlPkt.bits.buf_ptr        := credit_stage2.bits.pipe_meta.buf_ptr
       io.ctrlPkt.bits.buf_size_class := credit_stage2.bits.pipe_meta.buf_size_class
-      io.ctrlPkt.bits.grant_offset   := pull_offset
-      io.ctrlPkt.bits.grant_prio     := 0.U // unused for NDP
+      io.ctrlPkt.bits.credit         := pull_offset
+      io.ctrlPkt.bits.rank           := 0.U // unused for NDP
       io.ctrlPkt.bits.flags          := flags
       io.ctrlPkt.bits.is_new_msg     := false.B
       io.ctrlPkt.bits.is_rtx         := false.B

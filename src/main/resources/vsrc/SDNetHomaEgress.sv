@@ -1,9 +1,9 @@
 
 // *************************************************************************
-// SDNetNDPEgress.sv
+// SDNetHomaEgress.sv
 // *************************************************************************
 
-module SDNetNDPEgress #(
+module SDNetHomaEgress #(
   parameter TDATA_W = 512
 ) (
   // Packet In
@@ -29,18 +29,27 @@ module SDNetNDPEgress #(
   input                     net_meta_in_bits_is_new_msg,
   input                     net_meta_in_bits_is_rtx,
 
-  // Runtime Parameters
-  input              [47:0] net_nic_mac_addr,
-  input              [47:0] net_switch_mac_addr,
-  input              [31:0] net_nic_ip_addr,
-  input              [15:0] net_rtt_pkts,
-
   // Packet Out
   output                    net_net_out_valid,
   input                     net_net_out_ready,
   output      [TDATA_W-1:0] net_net_out_bits_data,
   output  [(TDATA_W/8)-1:0] net_net_out_bits_keep,
   output                    net_net_out_bits_last,
+
+  // Runtime Parameters
+  input              [47:0] net_nic_mac_addr,
+  input              [47:0] net_switch_mac_addr,
+  input              [31:0] net_nic_ip_addr,
+  input              [15:0] net_rtt_pkts,
+
+  /* IO for txMsgPrioReg */
+  output                    net_txMsgPrioReg_req_valid,
+  output             [15:0] net_txMsgPrioReg_req_bits_index,
+  output                    net_txMsgPrioReg_req_bits_update,
+  output              [7:0] net_txMsgPrioReg_req_bits_prio,
+
+  input                     net_txMsgPrioReg_resp_valid,
+  input               [7:0] net_txMsgPrioReg_resp_bits_prio,
 
   input                     reset,
   input                     clock
@@ -66,9 +75,9 @@ module SDNetNDPEgress #(
   wire                    s_axil_rready;
 
   wire                                   user_metadata_in_valid;
-  sdnet_ndp_egress_pkg::USER_META_DATA_T user_metadata_in;
+  sdnet_homa_egress_pkg::USER_META_DATA_T user_metadata_in;
   wire                                   user_metadata_out_valid;
-  sdnet_ndp_egress_pkg::USER_META_DATA_T user_metadata_out;
+  sdnet_homa_egress_pkg::USER_META_DATA_T user_metadata_out;
 
   assign user_metadata_in_valid = net_meta_in_valid;
   assign user_metadata_in.meta = {net_meta_in_bits_dst_ip,
@@ -89,8 +98,17 @@ module SDNetNDPEgress #(
                                     net_nic_ip_addr,
                                     net_rtt_pkts};
 
+  /* txMsgPrioReg extern */
+  assign net_txMsgPrioReg_req_valid = user_extern_out_valid.txMsgPrioReg;
+  assign {net_txMsgPrioReg_req_bits_index,
+          net_txMsgPrioReg_req_bits_update,
+          net_txMsgPrioReg_req_bits_prio} = user_extern_out.txMsgPrioReg;
+
+  assign user_extern_in_valid.txMsgPrioReg = 
+  assign user_extern_in.txMsgPrioReg = {net_txMsgPrioReg_resp_bits_prio};
+
   // SDNet module
-  sdnet_ndp_egress sdnet_ndp_egress_inst (
+  sdnet_homa_egress sdnet_homa_egress_inst (
     // Clocks & Resets
     .s_axis_aclk             (clock),
     .s_axis_aresetn          (~reset),
@@ -139,4 +157,4 @@ module SDNetNDPEgress #(
     .s_axi_rresp             (s_axil_rresp)
   );
 
-endmodule: SDNetNDPEgress
+endmodule: SDNetHomaEgress

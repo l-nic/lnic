@@ -176,8 +176,8 @@ class HomaEgress(implicit p: Parameters) extends Module {
         headers.homa_dst            := metaQueue_out.bits.meta_in.dst_context
         headers.homa_msg_len        := metaQueue_out.bits.meta_in.msg_len
         headers.homa_pkt_offset     := metaQueue_out.bits.meta_in.pkt_offset
-        headers.homa_grant_offset   := metaQueue_out.bits.meta_in.grant_offset
-        headers.homa_grant_prio     := metaQueue_out.bits.meta_in.grant_prio
+        headers.homa_grant_offset   := metaQueue_out.bits.meta_in.credit
+        headers.homa_grant_prio     := metaQueue_out.bits.meta_in.rank
         headers.homa_tx_msg_id      := metaQueue_out.bits.meta_in.tx_msg_id
         headers.homa_buf_ptr        := metaQueue_out.bits.meta_in.buf_ptr
         headers.homa_buf_size_class := metaQueue_out.bits.meta_in.buf_size_class

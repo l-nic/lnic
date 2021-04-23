@@ -48,8 +48,8 @@ class EgressMetaIn extends Bundle {
   val tx_msg_id      = UInt(MSG_ID_BITS.W)
   val buf_ptr        = UInt(BUF_PTR_BITS.W)
   val buf_size_class = UInt(SIZE_CLASS_BITS.W)
-  val grant_offset   = UInt(CREDIT_BITS.W)
-  val grant_prio     = UInt(HOMA_PRIO_BITS.W)
+  val credit         = UInt(CREDIT_BITS.W)
+  val rank           = UInt(HOMA_PRIO_BITS.W)
   val flags          = UInt(8.W)
   val is_new_msg     = Bool()
   val is_rtx         = Bool()
@@ -458,8 +458,8 @@ class LNICPacketize(implicit p: Parameters) extends Module {
   io.meta_out.bits.tx_msg_id      := active_tx_desc_reg.msg_desc.tx_msg_id
   io.meta_out.bits.buf_ptr        := active_tx_desc_reg.msg_desc.buf_ptr
   io.meta_out.bits.buf_size_class := active_tx_desc_reg.msg_desc.size_class
-  io.meta_out.bits.grant_offset   := 0.U
-  io.meta_out.bits.grant_prio     := 0.U
+  io.meta_out.bits.credit         := 0.U
+  io.meta_out.bits.rank           := 0.U
   io.meta_out.bits.flags          := DATA_MASK
   io.meta_out.bits.is_new_msg     := active_tx_desc_reg.is_new_msg
   io.meta_out.bits.is_rtx         := active_tx_desc_reg.is_rtx

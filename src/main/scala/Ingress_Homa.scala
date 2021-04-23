@@ -320,7 +320,7 @@ class HomaIngress(implicit p: Parameters) extends Module {
       cur_msg_stage1.bits.ingress_meta.is_last_pkt := is_last_pkt
 
       when (!io.get_rx_msg_info.resp.bits.fail && !rx_info_stage2.bits.pipe_meta.is_chopped) {
-        // access state for current msg in pendingMsgRed 
+        // access state for current msg in pendingMsgReg
         cur_msg_stage1.bits.pipe_meta.cur_msg_expect_resp := true.B
         io.pendingMsgReg.cur_msg_req.valid := true.B
         io.pendingMsgReg.cur_msg_req.bits.index          := rx_msg_id
@@ -359,8 +359,8 @@ class HomaIngress(implicit p: Parameters) extends Module {
         io.nackPkt.bits.tx_msg_id      := rx_info_stage2.bits.ingress_meta.tx_msg_id
         io.nackPkt.bits.buf_ptr        := rx_info_stage2.bits.pipe_meta.buf_ptr
         io.nackPkt.bits.buf_size_class := rx_info_stage2.bits.pipe_meta.buf_size_class
-        io.nackPkt.bits.grant_offset   := ackNo // used to ACK received DATA
-        io.nackPkt.bits.grant_prio     := 0.U // unused for NACKs
+        io.nackPkt.bits.credit         := ackNo // used to ACK received DATA
+        io.nackPkt.bits.rank           := 0.U // unused for NACKs
         io.nackPkt.bits.flags          := NACK_MASK
         io.nackPkt.bits.is_new_msg     := false.B
         io.nackPkt.bits.is_rtx         := false.B
@@ -438,8 +438,8 @@ class HomaIngress(implicit p: Parameters) extends Module {
       io.grantPkt.bits.tx_msg_id      := grant_msg_info.tx_msg_id
       io.grantPkt.bits.buf_ptr        := grant_msg_info.buf_ptr
       io.grantPkt.bits.buf_size_class := grant_msg_info.buf_size_class
-      io.grantPkt.bits.grant_offset   := grant_msg_stage2.bits.pipe_meta.grant_offset
-      io.grantPkt.bits.grant_prio     := grant_msg_stage2.bits.pipe_meta.grant_prio
+      io.grantPkt.bits.credit         := grant_msg_stage2.bits.pipe_meta.grant_offset
+      io.grantPkt.bits.rank           := grant_msg_stage2.bits.pipe_meta.grant_prio
       io.grantPkt.bits.flags          := GRANT_MASK
       io.grantPkt.bits.is_new_msg     := false.B
       io.grantPkt.bits.is_rtx         := false.B
@@ -456,8 +456,8 @@ class HomaIngress(implicit p: Parameters) extends Module {
       io.ackPkt.bits.tx_msg_id      := grant_msg_stage2.bits.ingress_meta.tx_msg_id
       io.ackPkt.bits.buf_ptr        := grant_msg_stage2.bits.pipe_meta.buf_ptr
       io.ackPkt.bits.buf_size_class := grant_msg_stage2.bits.pipe_meta.buf_size_class
-      io.ackPkt.bits.grant_offset   := 0.U // unused for ACKs
-      io.ackPkt.bits.grant_prio     := 0.U // unused for ACKs
+      io.ackPkt.bits.credit         := 0.U // unused for ACKs
+      io.ackPkt.bits.rank           := 0.U // unused for ACKs
       io.ackPkt.bits.flags          := ACK_MASK
       io.ackPkt.bits.is_new_msg     := false.B
       io.ackPkt.bits.is_rtx         := false.B
