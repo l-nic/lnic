@@ -26,6 +26,9 @@ class HomaIngressIO extends Bundle {
   val pendingMsgReg = new PendingMsgRegIO
   val grantScheduler = new GrantSchedulerIO
   val txMsgPrioReg_req = Valid(new TxMsgPrioIngressReq)
+  val nic_mac_addr = Input(UInt(ETH_MAC_BITS.W))
+  val switch_mac_addr = Input(UInt(ETH_MAC_BITS.W))
+  val nic_ip_addr = Input(UInt(32.W))
   val rtt_pkts = Input(UInt(CREDIT_BITS.W))
 
   override def cloneType = new HomaIngressIO().asInstanceOf[this.type]

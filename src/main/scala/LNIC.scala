@@ -106,7 +106,7 @@ object LNICConsts {
 case class LNICParams(
   max_rx_max_msgs_per_context: Int = LNICConsts.MAX_RX_MAX_MSGS_PER_CONTEXT,
   max_num_hosts: Int = LNICConsts.MAX_NUM_HOSTS,
-  transport: String = "NDP" // options: "NDP", "Homa"
+  transport: String = "NDP" // options: "NDP", "Homa", "P4-NDP"
 )
 
 case object LNICKey extends Field[Option[LNICParams]](None)
@@ -222,21 +222,25 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
     println("Building LNIC with NDP transport!")
   } else if (transport == "Homa") {
     println("Building LNIC with Homa transport!")
+  } else if (transport == "P4-NDP") {
+    println("Building LNIC with P4-NDP transport!")
   } else {
     require(false, "Unsupported LNIC transport: " + transport)
   }
 
-  val ndp_ingress  = if (transport == "NDP")  Some(Module(new NDPIngress)) else None
-  val homa_ingress = if (transport == "Homa") Some(Module(new HomaIngress)) else None
+  val ndp_ingress    = if (transport == "NDP")  Some(Module(new NDPIngress)) else None
+  val p4_ndp_ingress = if (transport == "P4-NDP") Some(Module(new SDNetNDPIngress)) else None
+  val homa_ingress   = if (transport == "Homa") Some(Module(new HomaIngress)) else None
 
-  val ndp_egress  = if (transport == "NDP")  Some(Module(new NDPEgress)) else None
-  val homa_egress = if (transport == "Homa") Some(Module(new HomaEgress)) else None
+  val ndp_egress    = if (transport == "NDP")  Some(Module(new NDPEgress)) else None
+  val p4_ndp_egress = if (transport == "P4-NDP") Some(Module(new SDNetNDPEgress)) else None
+  val homa_egress   = if (transport == "Homa") Some(Module(new HomaEgress)) else None
 
-  val ndp_pkt_gen  = if (transport == "NDP")  Some(Module(new NDPPktGen)) else None
+  val ndp_pkt_gen  = if (transport == "NDP" || transport == "P4-NDP")  Some(Module(new NDPPktGen)) else None
   val homa_pkt_gen = if (transport == "Homa") Some(Module(new HomaPktGen)) else None
 
   // NDP externs
-  val credit_reg = if (transport == "NDP") Some(Module(new IfElseRaw)) else None
+  val credit_reg = if (transport == "NDP" || transport == "P4-NDP") Some(Module(new IfElseRaw)) else None
 
   // Homa externs
   val pending_msg_reg = if (transport == "Homa") Some(Module(new PendingMsgReg)) else None
@@ -257,32 +261,57 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
   /* Event / Extern Connections */
   ////////////////////////////////
   if (transport == "NDP") {
-    assemble.io.get_rx_msg_info <> ndp_ingress.get.io.get_rx_msg_info
-    packetize.io.delivered := ndp_ingress.get.io.delivered
-    packetize.io.creditToBtx := ndp_ingress.get.io.creditToBtx
-    ndp_ingress.get.io.rtt_pkts := io.net.rtt_pkts
-    ndp_egress.get.io.nic_mac_addr := io.net.nic_mac_addr
-    ndp_egress.get.io.switch_mac_addr := io.net.switch_mac_addr
-    ndp_egress.get.io.nic_ip_addr := io.net.nic_ip_addr
-    credit_reg.get.io <> ndp_ingress.get.io.creditReg
-    ndp_pkt_gen.get.io.ctrlPkt := ndp_ingress.get.io.ctrlPkt
+    assemble.io.get_rx_msg_info        <> ndp_ingress.get.io.get_rx_msg_info
+    packetize.io.delivered             := ndp_ingress.get.io.delivered
+    packetize.io.creditToBtx           := ndp_ingress.get.io.creditToBtx
+    ndp_ingress.get.io.nic_mac_addr    := io.net.nic_mac_addr
+    ndp_ingress.get.io.switch_mac_addr := io.net.switch_mac_addr
+    ndp_ingress.get.io.nic_ip_addr     := io.net.nic_ip_addr
+    ndp_ingress.get.io.rtt_pkts        := io.net.rtt_pkts
+    ndp_egress.get.io.nic_mac_addr     := io.net.nic_mac_addr
+    ndp_egress.get.io.switch_mac_addr  := io.net.switch_mac_addr
+    ndp_egress.get.io.nic_ip_addr      := io.net.nic_ip_addr
+    ndp_egress.get.io.rtt_pkts         := io.net.rtt_pkts
+    credit_reg.get.io                  <> ndp_ingress.get.io.creditReg
+    ndp_pkt_gen.get.io.ctrlPkt         := ndp_ingress.get.io.ctrlPkt
+  } else if (transport == "P4-NDP") {
+    p4_ndp_ingress.get.io.clock := clock
+    p4_ndp_ingress.get.io.reset := reset
+    p4_ndp_egress.get.io.clock := clock
+    p4_ndp_egress.get.io.reset := reset
+    assemble.io.get_rx_msg_info           <> p4_ndp_ingress.get.io.net.get_rx_msg_info
+    packetize.io.delivered                := p4_ndp_ingress.get.io.net.delivered
+    packetize.io.creditToBtx              := p4_ndp_ingress.get.io.net.creditToBtx
+    p4_ndp_ingress.get.io.net.nic_mac_addr    := io.net.nic_mac_addr
+    p4_ndp_ingress.get.io.net.switch_mac_addr := io.net.switch_mac_addr
+    p4_ndp_ingress.get.io.net.nic_ip_addr     := io.net.nic_ip_addr
+    p4_ndp_ingress.get.io.net.rtt_pkts        := io.net.rtt_pkts
+    p4_ndp_egress.get.io.net.nic_mac_addr     := io.net.nic_mac_addr
+    p4_ndp_egress.get.io.net.switch_mac_addr  := io.net.switch_mac_addr
+    p4_ndp_egress.get.io.net.nic_ip_addr      := io.net.nic_ip_addr
+    p4_ndp_egress.get.io.net.rtt_pkts         := io.net.rtt_pkts
+    credit_reg.get.io                     <> p4_ndp_ingress.get.io.net.creditReg
+    ndp_pkt_gen.get.io.ctrlPkt            := p4_ndp_ingress.get.io.net.ctrlPkt
   } else if (transport == "Homa") {
-    assemble.io.get_rx_msg_info <> homa_ingress.get.io.get_rx_msg_info
-    packetize.io.delivered := homa_ingress.get.io.delivered
-    packetize.io.creditToBtx := homa_ingress.get.io.creditToBtx
-    homa_ingress.get.io.rtt_pkts := io.net.rtt_pkts
-    homa_egress.get.io.rtt_pkts := io.net.rtt_pkts
-    homa_egress.get.io.nic_mac_addr := io.net.nic_mac_addr
-    homa_egress.get.io.switch_mac_addr := io.net.switch_mac_addr
-    homa_egress.get.io.nic_ip_addr := io.net.nic_ip_addr
-    homa_pkt_gen.get.io.ackPkt   := homa_ingress.get.io.ackPkt
-    homa_pkt_gen.get.io.nackPkt   := homa_ingress.get.io.nackPkt
-    homa_pkt_gen.get.io.grantPkt := homa_ingress.get.io.grantPkt
-    pending_msg_reg.get.io <> homa_ingress.get.io.pendingMsgReg
-    grant_scheduler.get.io <> homa_ingress.get.io.grantScheduler
+    assemble.io.get_rx_msg_info          <> homa_ingress.get.io.get_rx_msg_info
+    packetize.io.delivered               := homa_ingress.get.io.delivered
+    packetize.io.creditToBtx             := homa_ingress.get.io.creditToBtx
+    homa_ingress.get.io.nic_mac_addr     := io.net.nic_mac_addr
+    homa_ingress.get.io.switch_mac_addr  := io.net.switch_mac_addr
+    homa_ingress.get.io.nic_ip_addr      := io.net.nic_ip_addr
+    homa_ingress.get.io.rtt_pkts         := io.net.rtt_pkts
+    homa_egress.get.io.nic_mac_addr      := io.net.nic_mac_addr
+    homa_egress.get.io.switch_mac_addr   := io.net.switch_mac_addr
+    homa_egress.get.io.nic_ip_addr       := io.net.nic_ip_addr
+    homa_egress.get.io.rtt_pkts          := io.net.rtt_pkts
+    homa_pkt_gen.get.io.ackPkt           := homa_ingress.get.io.ackPkt
+    homa_pkt_gen.get.io.nackPkt          := homa_ingress.get.io.nackPkt
+    homa_pkt_gen.get.io.grantPkt         := homa_ingress.get.io.grantPkt
+    pending_msg_reg.get.io               <> homa_ingress.get.io.pendingMsgReg
+    grant_scheduler.get.io               <> homa_ingress.get.io.grantScheduler
     // Wire up tx_msg_prio_reg to ingress and egress pipelines
-    tx_msg_prio_reg.get.io.ingress_req := homa_ingress.get.io.txMsgPrioReg_req
-    tx_msg_prio_reg.get.io.egress_req := homa_egress.get.io.txMsgPrioReg_req
+    tx_msg_prio_reg.get.io.ingress_req   := homa_ingress.get.io.txMsgPrioReg_req
+    tx_msg_prio_reg.get.io.egress_req    := homa_egress.get.io.txMsgPrioReg_req
     homa_egress.get.io.txMsgPrioReg_resp := tx_msg_prio_reg.get.io.egress_resp
   }
   msg_timers.io.schedule := packetize.io.schedule
@@ -305,6 +334,11 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
                        net_in_queue_deq)
     assemble.io.net_in <> ndp_ingress.get.io.net_out
     assemble.io.meta_in := ndp_ingress.get.io.meta_out
+  } else if (transport == "P4-NDP") {
+    StreamWidthAdapter(p4_ndp_ingress.get.io.net.net_in,
+                       net_in_queue_deq)
+    assemble.io.net_in <> p4_ndp_ingress.get.io.net.net_out
+    assemble.io.meta_in := p4_ndp_ingress.get.io.net.meta_out
   } else if (transport == "Homa") {
     StreamWidthAdapter(homa_ingress.get.io.net_in,
                        net_in_queue_deq)
@@ -337,6 +371,14 @@ class LNICModuleImp(outer: LNIC)(implicit p: Parameters) extends LazyModuleImp(o
     // 512-bit => 64-bit
     StreamWidthAdapter(io.net.out,
                        ndp_egress.get.io.net_out)
+  } else if (transport == "P4-NDP") {
+    arbiter.io.ctrl_in <> ndp_pkt_gen.get.io.net_out
+    arbiter.io.ctrl_meta_in := ndp_pkt_gen.get.io.meta_out
+    p4_ndp_egress.get.io.net.net_in <> arbiter.io.net_out
+    p4_ndp_egress.get.io.net.meta_in := arbiter.io.meta_out
+    // 512-bit => 64-bit
+    StreamWidthAdapter(io.net.out,
+                       p4_ndp_egress.get.io.net.net_out)
   } else if (transport == "Homa") {
     arbiter.io.ctrl_in <> homa_pkt_gen.get.io.net_out
     arbiter.io.ctrl_meta_in := homa_pkt_gen.get.io.meta_out

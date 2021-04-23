@@ -1,40 +1,12 @@
 
 // *************************************************************************
-//
-// Copyright (c) 2020 Stanford University All rights reserved.
-//
-// This software was developed by
-// Stanford University and the University of Cambridge Computer Laboratory
-// under National Science Foundation under Grant No. CNS-0855268,
-// the University of Cambridge Computer Laboratory under EPSRC INTERNET Project EP/H040536/1 and
-// by the University of Cambridge Computer Laboratory under DARPA/AFRL contract FA8750-11-C-0249 ("MRC2"),
-// as part of the DARPA MRC research programme.
-//
-// @NETFPGA_LICENSE_HEADER_START@
-//
-// Licensed to NetFPGA C.I.C. (NetFPGA) under one or more contributor
-// license agreements.  See the NOTICE file distributed with this work for
-// additional information regarding copyright ownership.  NetFPGA licenses this
-// file to you under the NetFPGA Hardware-Software License, Version 1.0 (the
-// "License"); you may not use this file except in compliance with the
-// License.  You may obtain a copy of the License at:
-//
-//   http://www.netfpga-cic.org
-//
-// Unless required by applicable law or agreed to in writing, Work distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-// CONDITIONS OF ANY KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations under the License.
-//
-// @NETFPGA_LICENSE_HEADER_END@
-// *************************************************************************
-// NOTE: machine-generated file --- DO NOT EDIT!!
+// SDNetNDPIngress.sv
 // *************************************************************************
 //`timescale 1ns/1ps
 
-// import sdnet_ingress_pkg::*;
+// import sdnet_ndp_ingress_pkg::*;
 
-module SDNetIngressWrapper #(
+module SDNetNDPIngress #(
   parameter TDATA_W = 512
 ) (
   // Packet In
@@ -51,6 +23,12 @@ module SDNetIngressWrapper #(
   output  [(TDATA_W/8)-1:0] net_net_out_bits_keep,
   output                    net_net_out_bits_last,
 
+  // Runtime Parameters
+  input              [47:0] net_nic_mac_addr,
+  input              [47:0] net_switch_mac_addr,
+  input              [31:0] net_nic_ip_addr,
+  input              [15:0] net_rtt_pkts,
+
   // Metadata Out
   output                    net_meta_out_valid,
   output             [31:0] net_meta_out_bits_src_ip,
@@ -60,22 +38,28 @@ module SDNetIngressWrapper #(
   output             [15:0] net_meta_out_bits_dst_context,
   output             [15:0] net_meta_out_bits_rx_msg_id,
   output             [15:0] net_meta_out_bits_tx_msg_id,
+  output                    net_meta_out_bits_is_last_pkt,
 
   /* IO for get_rx_msg_info */
   output                    net_get_rx_msg_info_req_valid,
+  output                    net_get_rx_msg_info_req_bits_mark_received,
   output             [31:0] net_get_rx_msg_info_req_bits_src_ip,
   output             [15:0] net_get_rx_msg_info_req_bits_src_context,
   output             [15:0] net_get_rx_msg_info_req_bits_tx_msg_id,
   output             [15:0] net_get_rx_msg_info_req_bits_msg_len,
+  output              [7:0] net_get_rx_msg_info_req_bits_pkt_offset,
   input                     net_get_rx_msg_info_resp_valid,
   input                     net_get_rx_msg_info_resp_bits_fail,
   input              [15:0] net_get_rx_msg_info_resp_bits_rx_msg_id,
   input                     net_get_rx_msg_info_resp_bits_is_new_msg,
+  input                     net_get_rx_msg_info_resp_bits_is_new_pkt,
+  input                     net_get_rx_msg_info_resp_bits_is_last_pkt,
+  input               [8:0] net_get_rx_msg_info_resp_bits_ackNo,
 
   /* IO for delivered event */
   output                    net_delivered_valid,
   output             [15:0] net_delivered_bits_tx_msg_id,
-  output              [7:0] net_delivered_bits_pkt_offset,
+  output             [37:0] net_delivered_bits_delivered_pkts,
   output             [15:0] net_delivered_bits_msg_len,
   output             [15:0] net_delivered_bits_buf_ptr,
   output              [7:0] net_delivered_bits_buf_size_class,
@@ -104,10 +88,11 @@ module SDNetIngressWrapper #(
   output             [15:0] net_ctrlPkt_bits_tx_msg_id,
   output             [15:0] net_ctrlPkt_bits_buf_ptr,
   output              [7:0] net_ctrlPkt_bits_buf_size_class,
-  output             [15:0] net_ctrlPkt_bits_pull_offset,
-  output                    net_ctrlPkt_bits_genACK,
-  output                    net_ctrlPkt_bits_genNACK,
-  output                    net_ctrlPkt_bits_genPULL,
+  output             [15:0] net_ctrlPkt_bits_grant_offset,
+  output              [7:0] net_ctrlPkt_bits_grant_prio,
+  output              [7:0] net_ctrlPkt_bits_flags,
+  output                    net_ctrlPkt_bits_is_new_msg,
+  output                    net_ctrlPkt_bits_is_rtx,
 
   /* IO for credit ifElseRaw extern */
   output                    net_creditReg_req_valid,
@@ -143,15 +128,15 @@ module SDNetIngressWrapper #(
   wire              [1:0] s_axil_rresp;
   wire                    s_axil_rready;
 
-  reg                                 user_metadata_in_valid;
-  sdnet_ingress_pkg::USER_META_DATA_T user_metadata_in;
-  wire                                user_metadata_out_valid;
-  sdnet_ingress_pkg::USER_META_DATA_T user_metadata_out;
+  reg                                     user_metadata_in_valid;
+  sdnet_ndp_ingress_pkg::USER_META_DATA_T user_metadata_in;
+  wire                                    user_metadata_out_valid;
+  sdnet_ndp_ingress_pkg::USER_META_DATA_T user_metadata_out;
 
-  sdnet_ingress_pkg::USER_EXTERN_VALID_T user_extern_out_valid;
-  sdnet_ingress_pkg::USER_EXTERN_OUT_T   user_extern_out;
-  sdnet_ingress_pkg::USER_EXTERN_VALID_T user_extern_in_valid;
-  sdnet_ingress_pkg::USER_EXTERN_IN_T    user_extern_in;
+  sdnet_ndp_ingress_pkg::USER_EXTERN_VALID_T user_extern_out_valid;
+  sdnet_ndp_ingress_pkg::USER_EXTERN_OUT_T   user_extern_out;
+  sdnet_ndp_ingress_pkg::USER_EXTERN_VALID_T user_extern_in_valid;
+  sdnet_ndp_ingress_pkg::USER_EXTERN_IN_T    user_extern_in;
 
   /* Output metadata */
   assign net_meta_out_valid = user_metadata_out_valid;
@@ -161,24 +146,30 @@ module SDNetIngressWrapper #(
           net_meta_out_bits_pkt_offset,
           net_meta_out_bits_dst_context,
           net_meta_out_bits_rx_msg_id,
-          net_meta_out_bits_tx_msg_id} = user_metadata_out;
+          net_meta_out_bits_tx_msg_id,
+          net_meta_out_bits_is_last_pkt} = user_metadata_out.meta;
 
   /* get_rx_msg_info extern */
   assign net_get_rx_msg_info_req_valid = user_extern_out_valid.get_rx_msg_info;
-  assign {net_get_rx_msg_info_req_bits_src_ip,
+  assign {net_get_rx_msg_info_req_bits_mark_received,
+          net_get_rx_msg_info_req_bits_src_ip,
           net_get_rx_msg_info_req_bits_src_context,
           net_get_rx_msg_info_req_bits_tx_msg_id,
-          net_get_rx_msg_info_req_bits_msg_len} = user_extern_out.get_rx_msg_info;
+          net_get_rx_msg_info_req_bits_msg_len,
+          net_get_rx_msg_info_req_bits_pkt_offset} = user_extern_out.get_rx_msg_info;
 
   assign user_extern_in_valid.get_rx_msg_info = net_get_rx_msg_info_resp_valid;
   assign user_extern_in.get_rx_msg_info = {net_get_rx_msg_info_resp_bits_fail,
                                            net_get_rx_msg_info_resp_bits_rx_msg_id,
-                                           net_get_rx_msg_info_resp_bits_is_new_msg};
+                                           net_get_rx_msg_info_resp_bits_is_new_msg,
+                                           net_get_rx_msg_info_resp_bits_is_new_pkt,
+                                           net_get_rx_msg_info_resp_bits_is_last_pkt,
+                                           net_get_rx_msg_info_resp_bits_ackNo};
 
   /* delivered event */
   assign net_delivered_valid = user_extern_out_valid.delivered_event;
   assign {net_delivered_bits_tx_msg_id,
-          net_delivered_bits_pkt_offset,
+          net_delivered_bits_delivered_pkts,
           net_delivered_bits_msg_len,
           net_delivered_bits_buf_ptr,
           net_delivered_bits_buf_size_class} = user_extern_out.delivered_event;
@@ -207,10 +198,11 @@ module SDNetIngressWrapper #(
           net_ctrlPkt_bits_tx_msg_id,
           net_ctrlPkt_bits_buf_ptr,
           net_ctrlPkt_bits_buf_size_class,
-          net_ctrlPkt_bits_pull_offset,
-          net_ctrlPkt_bits_genACK,
-          net_ctrlPkt_bits_genNACK,
-          net_ctrlPkt_bits_genPULL} = user_extern_out.ctrlPkt_event;
+          net_ctrlPkt_bits_grant_offset,
+          net_ctrlPkt_bits_grant_prio,
+          net_ctrlPkt_bits_flags,
+          net_ctrlPkt_bits_is_new_msg,
+          net_ctrlPkt_bits_is_rtx} = user_extern_out.ctrlPkt_event;
 
   /* creditReg ifElseRaw extern */
   assign net_creditReg_req_valid = user_extern_out_valid.credit_ifElseRaw;
@@ -225,7 +217,7 @@ module SDNetIngressWrapper #(
   assign user_extern_in.credit_ifElseRaw = {net_creditReg_resp_bits_new_val};
 
   // SDNet module
-  sdnet_ingress sdnet_ingress_inst (
+  sdnet_ndp_ingress sdnet_ndp_ingress_inst (
     // Clocks & Resets
     .s_axis_aclk             (clock),
     .s_axis_aresetn          (~reset),
@@ -279,7 +271,11 @@ module SDNetIngressWrapper #(
     .s_axi_rresp             (s_axil_rresp)
   );
 
-  assign user_metadata_in = 'b0;
+  assign user_metadata_in.meta = 'b0;
+  assign user_metadata_in.params = {net_nic_mac_addr,
+                                    net_switch_mac_addr,
+                                    net_nic_ip_addr,
+                                    net_rtt_pkts};
 
   // State machine to drive user_metadata_in_valid
   reg state, next_state;
@@ -339,4 +335,4 @@ module SDNetIngressWrapper #(
   assign user_extern_in.creditToBtx_event = dummy;
   assign user_extern_in.ctrlPkt_event     = dummy;
 
-endmodule: SDNetIngressWrapper
+endmodule: SDNetNDPIngress

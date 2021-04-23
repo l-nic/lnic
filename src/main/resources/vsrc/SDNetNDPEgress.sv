@@ -1,40 +1,12 @@
 
 // *************************************************************************
-//
-// Copyright (c) 2020 Stanford University All rights reserved.
-//
-// This software was developed by
-// Stanford University and the University of Cambridge Computer Laboratory
-// under National Science Foundation under Grant No. CNS-0855268,
-// the University of Cambridge Computer Laboratory under EPSRC INTERNET Project EP/H040536/1 and
-// by the University of Cambridge Computer Laboratory under DARPA/AFRL contract FA8750-11-C-0249 ("MRC2"),
-// as part of the DARPA MRC research programme.
-//
-// @NETFPGA_LICENSE_HEADER_START@
-//
-// Licensed to NetFPGA C.I.C. (NetFPGA) under one or more contributor
-// license agreements.  See the NOTICE file distributed with this work for
-// additional information regarding copyright ownership.  NetFPGA licenses this
-// file to you under the NetFPGA Hardware-Software License, Version 1.0 (the
-// "License"); you may not use this file except in compliance with the
-// License.  You may obtain a copy of the License at:
-//
-//   http://www.netfpga-cic.org
-//
-// Unless required by applicable law or agreed to in writing, Work distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-// CONDITIONS OF ANY KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations under the License.
-//
-// @NETFPGA_LICENSE_HEADER_END@
-// *************************************************************************
-// NOTE: machine-generated file --- DO NOT EDIT!!
+// SDNetNDPEgress.sv
 // *************************************************************************
 //`timescale 1ns/1ps
 
-// import sdnet_egress_pkg::*;
+// import sdnet_ndp_egress_pkg::*;
 
-module SDNetEgressWrapper #(
+module SDNetNDPEgress #(
   parameter TDATA_W = 512
 ) (
   // Packet In
@@ -54,10 +26,17 @@ module SDNetEgressWrapper #(
   input              [15:0] net_meta_in_bits_tx_msg_id,
   input              [15:0] net_meta_in_bits_buf_ptr,
   input               [7:0] net_meta_in_bits_buf_size_class,
-  input              [15:0] net_meta_in_bits_pull_offset,
-  input                     net_meta_in_bits_genACK,
-  input                     net_meta_in_bits_genNACK,
-  input                     net_meta_in_bits_genPULL,
+  input              [15:0] net_meta_in_bits_grant_offset,
+  input               [7:0] net_meta_in_bits_grant_prio,
+  input               [7:0] net_meta_in_bits_flags,
+  input                     net_meta_in_bits_is_new_msg,
+  input                     net_meta_in_bits_is_rtx,
+
+  // Runtime Parameters
+  input              [47:0] net_nic_mac_addr,
+  input              [47:0] net_switch_mac_addr,
+  input              [31:0] net_nic_ip_addr,
+  input              [15:0] net_rtt_pkts,
 
   // Packet Out
   output                    net_net_out_valid,
@@ -89,27 +68,32 @@ module SDNetEgressWrapper #(
   wire              [1:0] s_axil_rresp;
   wire                    s_axil_rready;
 
-  wire                               user_metadata_in_valid;
-  sdnet_egress_pkg::USER_META_DATA_T user_metadata_in;
-  wire                               user_metadata_out_valid;
-  sdnet_egress_pkg::USER_META_DATA_T user_metadata_out;
+  wire                                   user_metadata_in_valid;
+  sdnet_ndp_egress_pkg::USER_META_DATA_T user_metadata_in;
+  wire                                   user_metadata_out_valid;
+  sdnet_ndp_egress_pkg::USER_META_DATA_T user_metadata_out;
 
   assign user_metadata_in_valid = net_meta_in_valid;
-  assign user_metadata_in = {net_meta_in_bits_dst_ip,
-                             net_meta_in_bits_dst_context,
-                             net_meta_in_bits_msg_len,
-                             net_meta_in_bits_pkt_offset,
-                             net_meta_in_bits_src_context,
-                             net_meta_in_bits_tx_msg_id,
-                             net_meta_in_bits_buf_ptr,
-                             net_meta_in_bits_buf_size_class,
-                             net_meta_in_bits_pull_offset,
-                             net_meta_in_bits_genACK,
-                             net_meta_in_bits_genNACK,
-                             net_meta_in_bits_genPULL};
+  assign user_metadata_in.meta = {net_meta_in_bits_dst_ip,
+                                  net_meta_in_bits_dst_context,
+                                  net_meta_in_bits_msg_len,
+                                  net_meta_in_bits_pkt_offset,
+                                  net_meta_in_bits_src_context,
+                                  net_meta_in_bits_tx_msg_id,
+                                  net_meta_in_bits_buf_ptr,
+                                  net_meta_in_bits_buf_size_class,
+                                  net_meta_in_bits_grant_offset,
+                                  net_meta_in_bits_grant_prio,
+                                  net_meta_in_bits_flags,
+                                  net_meta_in_bits_is_new_msg,
+                                  net_meta_in_bits_is_rtx};
+  assign user_metadata_in.params = {net_nic_mac_addr,
+                                    net_switch_mac_addr,
+                                    net_nic_ip_addr,
+                                    net_rtt_pkts};
 
   // SDNet module
-  sdnet_egress sdnet_egress_inst (
+  sdnet_ndp_egress sdnet_ndp_egress_inst (
     // Clocks & Resets
     .s_axis_aclk             (clock),
     .s_axis_aresetn          (~reset),
@@ -158,4 +142,4 @@ module SDNetEgressWrapper #(
     .s_axi_rresp             (s_axil_rresp)
   );
 
-endmodule: SDNetEgressWrapper
+endmodule: SDNetNDPEgress

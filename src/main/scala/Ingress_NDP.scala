@@ -22,6 +22,9 @@ class NDPIngressIO extends Bundle {
   val creditToBtx = Valid(new CreditToBtxEvent)
   val ctrlPkt = Valid(new EgressMetaIn)
   val creditReg = new IfElseRawIO
+  val nic_mac_addr = Input(UInt(ETH_MAC_BITS.W))
+  val switch_mac_addr = Input(UInt(ETH_MAC_BITS.W))
+  val nic_ip_addr = Input(UInt(32.W))
   val rtt_pkts = Input(UInt(CREDIT_BITS.W))
 
   override def cloneType = new NDPIngressIO().asInstanceOf[this.type]
