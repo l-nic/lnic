@@ -174,9 +174,9 @@ module SDNetHomaIngress #(
   input                [15:0] net_grantScheduler_resp_bits_grant_msg_id,
 
   /* IO for txMsgPrioReg_req */
-  output                      net_grantScheduler_req_valid,
-  output               [15:0] net_grantScheduler_req_bits_index,
-  output                [7:0] net_grantScheduler_req_bits_prio,
+  output                      net_txMsgPrioReg_req_valid,
+  output               [15:0] net_txMsgPrioReg_req_bits_index,
+  output                [7:0] net_txMsgPrioReg_req_bits_prio,
 
   input                     reset,
   input                     clock
@@ -360,9 +360,9 @@ module SDNetHomaIngress #(
                                           net_grantScheduler_resp_bits_grant_msg_id};
 
   /* txMsgPrioReg_req extern */
-  assign net_grantScheduler_req_valid = user_extern_out_valid.txMsgPrioReg;
-  assign {net_grantScheduler_req_bits_index,
-          net_grantScheduler_req_bits_prio} = user_extern_out.txMsgPrioReg;
+  assign net_txMsgPrioReg_req_valid = user_extern_out_valid.txMsgPrioReg;
+  assign {net_txMsgPrioReg_req_bits_index,
+          net_txMsgPrioReg_req_bits_prio} = user_extern_out.txMsgPrioReg;
 
 
   // SDNet module

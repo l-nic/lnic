@@ -79,6 +79,11 @@ module SDNetHomaEgress #(
   wire                                   user_metadata_out_valid;
   sdnet_homa_egress_pkg::USER_META_DATA_T user_metadata_out;
 
+  sdnet_homa_egress_pkg::USER_EXTERN_VALID_T user_extern_out_valid;
+  sdnet_homa_egress_pkg::USER_EXTERN_OUT_T   user_extern_out;
+  sdnet_homa_egress_pkg::USER_EXTERN_VALID_T user_extern_in_valid;
+  sdnet_homa_egress_pkg::USER_EXTERN_IN_T    user_extern_in;
+
   assign user_metadata_in_valid = net_meta_in_valid;
   assign user_metadata_in.meta = {net_meta_in_bits_dst_ip,
                                   net_meta_in_bits_dst_context,
@@ -104,7 +109,7 @@ module SDNetHomaEgress #(
           net_txMsgPrioReg_req_bits_update,
           net_txMsgPrioReg_req_bits_prio} = user_extern_out.txMsgPrioReg;
 
-  assign user_extern_in_valid.txMsgPrioReg = 
+  assign user_extern_in_valid.txMsgPrioReg = net_txMsgPrioReg_resp_valid;
   assign user_extern_in.txMsgPrioReg = {net_txMsgPrioReg_resp_bits_prio};
 
   // SDNet module
