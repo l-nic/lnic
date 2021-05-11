@@ -635,7 +635,7 @@ class GrantScheduler(implicit p: Parameters) extends Module {
   }
 
   // Drive the response IO
-  io.resp.valid := req_valid_reg_1
+  io.resp.valid := req_valid_reg_1 & !reset.toBool
   io.resp.bits := result_reg
 }
 

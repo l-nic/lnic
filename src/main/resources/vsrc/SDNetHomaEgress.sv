@@ -130,6 +130,11 @@ module SDNetHomaEgress #(
     .user_metadata_in_valid  (user_metadata_in_valid),
     .user_metadata_out       (user_metadata_out),
     .user_metadata_out_valid (user_metadata_out_valid),
+    // User Extern Data
+    .user_extern_in          (user_extern_in),
+    .user_extern_in_valid    (user_extern_in_valid),
+    .user_extern_out         (user_extern_out),
+    .user_extern_out_valid   (user_extern_out_valid),
     // AXI4 Stream Slave port
     .s_axis_tvalid           (net_net_in_valid),
     .s_axis_tready           (net_net_in_ready),
