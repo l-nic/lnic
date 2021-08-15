@@ -73,7 +73,7 @@ class NDPEgress(implicit p: Parameters) extends Module {
   switch(deqState) {
     is (sWordOne) {
       when (pktQueue_out.valid && metaQueue_out.valid) {
-        val is_data_pkt = (metaQueue_out.bits.flags & DATA_MASK > 0.U)
+        val is_data_pkt = ((metaQueue_out.bits.flags & DATA_MASK) > 0.U)
 
         // fill out headers
         val headers = Wire(new NDPHeaders)
@@ -89,7 +89,7 @@ class NDPEgress(implicit p: Parameters) extends Module {
         val ip_len = Wire(UInt(16.W))
         when (!is_data_pkt) {
           // this is a control pkt
-          ip_len   := IP_HDR_BYTES.U + LNIC_CTRL_PKT_BYTES.U
+          ip_len   := IP_HDR_BYTES.U(16.W) + LNIC_CTRL_PKT_BYTES.U(16.W)
         } .otherwise {
           // this is a data pkt
           val msg_len = metaQueue_out.bits.msg_len
