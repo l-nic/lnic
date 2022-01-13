@@ -62,11 +62,13 @@ object LNICConsts {
   val LINK_RATE_GBPS = 200
   val CYCLE_RATE_GHZ = 3
   val MTU_BYTES = MAX_SEG_LEN_BYTES + LNIC_HDR_BYTES + IP_HDR_BYTES + 14
-  val MTU_CYCLES = (CYCLE_RATE_GHZ*(MAX_SEG_LEN_BYTES*8)/LINK_RATE_GBPS).toInt
+  //val MTU_CYCLES = (CYCLE_RATE_GHZ*(MAX_SEG_LEN_BYTES*8)/LINK_RATE_GBPS).toInt
+  val MTU_CYCLES = 1
 
   // Message buffers for both packetization and reassembly
   // LinkedHashMap[Int, Int] : {buffer_size (bytes) => num_buffers}
-  val MSG_BUFFER_COUNT = LinkedHashMap(MAX_MSG_SIZE_BYTES -> 16)
+  val MSG_BUFFER_COUNT = LinkedHashMap(1024 -> 64,
+                                          MAX_MSG_SIZE_BYTES -> 64)
   val NUM_MSG_BUFFER_WORDS = MSG_BUFFER_COUNT.map({ case (size: Int, count: Int) => (size/NET_DP_BYTES)*count }).reduce(_ + _)
   val NUM_MSG_BUFFERS = MSG_BUFFER_COUNT.map({ case (size: Int, count: Int) => count }).reduce(_ + _)
   // TODO(sibanez): how best to size these queues?
@@ -76,7 +78,7 @@ object LNICConsts {
   val PACED_PKTS_Q_DEPTH = 256
 
   // this is used to decide how many bits of the src IP to look at when allocating rx msg IDs
-  val MAX_NUM_HOSTS = 16
+  val MAX_NUM_HOSTS = 128
 
   // The maximum number of max size msgs that are provisioned to each context in the global RX queues
   val MAX_RX_MAX_MSGS_PER_CONTEXT = 2
